@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qaqc"
+version = "0.1.0"
+description = "Automated QA/QC checks for mineral resource block models (Datamine, Isatis, Leapfrog)"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.1",
+    "numpy",
+    "scipy",
+    "pyarrow",
+    "plotly",
+    "jinja2",
+    "pyyaml",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.setuptools.packages.find]
+include = ["qaqc*"]
+
+[tool.setuptools.package-data]
+qaqc = ["aliases.yaml", "templates/*.j2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY"]

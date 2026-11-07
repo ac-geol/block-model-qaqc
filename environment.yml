@@ -1,0 +1,18 @@
+name: bm_qaqc
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - pandas>=2.1
+  - numpy
+  - scipy
+  - pyarrow
+  - plotly
+  - jinja2
+  - pyyaml
+  - pydantic>=2
+  - pytest
+  - ruff
+  - pip
+  - pip:
+      - -e .

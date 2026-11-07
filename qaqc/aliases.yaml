@@ -1,0 +1,161 @@
+# Column-name alias tables used to recognise block model and composite columns.
+#
+# All names here are written in their "normalized" form: lowercase, with any run of spaces or
+# punctuation replaced by a single underscore (a "%" is kept). For example "OK Cu: NS" is
+# written as ok_cu_ns.
+#
+# Entries marked "verify" come from documentation and experience, not from real export files.
+# They stay provisional until checked against real header samples in tests/fixtures/headers/.
+#
+# Projects can add aliases without editing this file by pointing paths.extra_aliases at a YAML
+# file with the same layout; its lists are added to the lists below.
+
+# --- Block model structural columns (exact match on the normalized name) ---------------------
+structural:
+  x:
+    generic: [x, xc, x_c, xcentre, xcenter, x_centre, x_center, xcentroid, x_centroid, east, easting]
+    isatis: [x1, x_gravity_center]            # verify
+  y:
+    generic: [y, yc, y_c, ycentre, ycenter, y_centre, y_center, ycentroid, y_centroid, north, northing]
+    isatis: [x2, y_gravity_center]            # verify
+  z:
+    generic: [z, zc, z_c, zcentre, zcenter, z_centre, z_center, zcentroid, z_centroid, elev, elevation, rl]
+    isatis: [x3, z_gravity_center]            # verify
+  dx:
+    generic: [dx, xinc, xsize, x_size, dlx, x_len, xlength, x_length, size_x]
+    datamine: [xinc]                          # verify
+  dy:
+    generic: [dy, yinc, ysize, y_size, dly, y_len, ylength, y_length, size_y]
+    datamine: [yinc]                          # verify
+  dz:
+    generic: [dz, zinc, zsize, z_size, dlz, z_len, zlength, z_length, size_z]
+    datamine: [zinc]                          # verify
+  pct:
+    generic: [pct, percent, pct_ore, ore_pct, proportion, prop, domain_pct, pct_domain, vol_pct]
+  topo_pct:
+    generic: [topo_pct, pct_topo, topo, below_topo]
+  sg:
+    generic: [sg, density, bulk_density, dens, spec_grav, bd, dbd, dry_density]
+  domain:
+    generic: [domain, dom, zone, minzone, geodomain, estdom, est_domain, domain_code, domcode]
+    datamine: [kzone]                         # verify
+  classif:
+    generic: [classif, class, classification, res_class, rescat, rescla, category, resource_class, class_final]
+  selection:
+    generic: []                               # by default only via column_overrides
+    isatis: [sel, selection]                  # verify
+  x_origin:
+    datamine: [xmorig]                        # verify
+  y_origin:
+    datamine: [ymorig]                        # verify
+  z_origin:
+    datamine: [zmorig]                        # verify
+  nx:
+    datamine: [nx]                            # verify
+  ny:
+    datamine: [ny]                            # verify
+  nz:
+    datamine: [nz]                            # verify
+  ijk:
+    generic: [ijk]
+    datamine: [ijk]                           # verify
+
+required_structural: [x, y, z, domain]
+
+# --- Composite structural columns -------------------------------------------------------------
+composite_structural:
+  x:
+    generic: [x, xc, x_c, xcentre, xcenter, x_centre, x_center, east, easting, xm, x_mid, mid_x, xmid]
+  y:
+    generic: [y, yc, y_c, ycentre, ycenter, y_centre, y_center, north, northing, ym, y_mid, mid_y, ymid]
+  z:
+    generic: [z, zc, z_c, zcentre, zcenter, z_centre, z_center, elev, elevation, rl, zm, z_mid, mid_z, zmid]
+  domain:
+    generic: [domain, dom, zone, minzone, geodomain, estdom, est_domain, domain_code, domcode]
+    datamine: [kzone]                         # verify
+  length:
+    generic: [length, len, comp_length, sample_length]
+  from_depth:
+    generic: [from, from_m, depth_from, mfrom]
+  to_depth:
+    generic: [to, to_m, depth_to, mto]
+  hole_id:
+    generic: [holeid, hole_id, bhid, dhid, hole]
+
+composite_required_structural: [x, y, z, domain]
+
+# --- Elements (token match) ----------------------------------------------------------------------
+# element symbol -> names that mean that element when they appear as a whole word in a column name
+elements:
+  cu: [cu, copper]
+  ni: [ni, nickel]
+  co: [co, cobalt]
+  fe: [fe, iron]
+  s: [s, sulfur, sulphur]
+  zn: [zn, zinc]
+  pb: [pb, lead]
+  au: [au, gold]
+  ag: [ag, silver]
+  pd: [pd, palladium]
+  pt: [pt, platinum]
+
+# canonical unit used when an element is found in the file but not listed in the project config
+canonical_units:
+  cu: pct
+  ni: pct
+  co: pct
+  fe: pct
+  s: pct
+  zn: pct
+  pb: pct
+  au: gpt
+  ag: gpt
+  pd: gpt
+  pt: gpt
+
+# estimation method words; must sit directly next to the element word
+estimator_tokens: [ok, sk, uk, ck, cok, ik, mik, uc, idw, id, id2, id3, ids, nn, pnn, poly, kriging, krig, kriged, est, final]
+
+# estimation methods that give a nearest-neighbour style benchmark rather than an estimate
+nn_estimators: [nn, pnn, poly]
+
+# unit words -> unit. "g_t" is matched as the two words g and t next to each other.
+unit_tokens:
+  pct: [pct, "%", percent]
+  ppm: [ppm]
+  ppb: [ppb]
+  gpt: [gpt, gt, g_t]
+
+# words that mark a capped (top-cut) composite grade
+cap_tokens: [cap, capped, tc, topcut, cut]
+
+# --- Estimation details ("metadata") ---------------------------------------------------------------
+# aliases: names matched after the element and method words are removed
+# not_standalone: aliases too vague to use for a column that has no element word
+# software: aliases that only apply to one software package
+metadata:
+  pass_num:
+    aliases: [pass, pass_num, passnum, npass, search_pass, est_pass]
+    software: {datamine: [svol]}              # verify
+  nsamples:
+    aliases: [ns, nsamp, nsamples, num_samples, n_samples, ncomps, n_comps, num_comps, nsam]
+  nholes:
+    aliases: [nh, nholes, n_holes, num_holes, ndh, num_dh, nhole]
+  min_dist:
+    aliases: [mind, min_dist, dmin, dist_min, mindist, nearest_dist]
+  avg_dist:
+    aliases: [avgd, avg_dist, davg, dist_avg, mean_dist, avedist]
+  kriging_var:
+    aliases: [kv, kvar, krig_var, krigvar, kriging_variance, variance, var]
+    not_standalone: [variance, var]
+  kriging_std:
+    aliases: [kstd, ksd, std, stdev, std_dev, kriging_std]
+    not_standalone: [std, stdev, std_dev]
+  kriging_eff:
+    aliases: [ke, keff, krig_eff, kriging_efficiency, efficiency]
+    not_standalone: [efficiency]
+  slope_reg:
+    aliases: [sor, slope, slope_reg, slopereg, slope_of_regression, regression_slope]
+    not_standalone: [slope]
+  status:
+    aliases: [status, est_status]
