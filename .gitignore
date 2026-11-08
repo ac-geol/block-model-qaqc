@@ -8,3 +8,4 @@ qaqc_outputs/
 .ipynb_checkpoints/
 .DS_Store
 .claude/settings.local.json
+qaqc_benchmark/

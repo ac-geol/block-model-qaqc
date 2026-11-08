@@ -453,8 +453,14 @@ def prescan(source: str | Path) -> HeaderInfo:
     if isinstance(source, str) and "\n" in source:
         lines = source.splitlines()[:PRESCAN_LINES]
     else:
-        with open(source, encoding="utf-8-sig", errors="replace") as fh:
-            lines = [ln for _, ln in zip(range(PRESCAN_LINES), fh, strict=False)]
+        try:
+            with open(source, encoding="utf-8-sig", errors="replace") as fh:
+                lines = [ln for _, ln in zip(range(PRESCAN_LINES), fh, strict=False)]
+        except PermissionError:
+            raise SchemaError(
+                f"Cannot open {source}. If the file is open in Excel or another program, close "
+                "it and try again."
+            ) from None
     return prescan_lines(lines)
 
 

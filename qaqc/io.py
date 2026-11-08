@@ -108,9 +108,15 @@ def internal_columns(schema: ResolvedSchema) -> dict[str, str]:
 def file_sha256(path: str | Path, chunk: int = 8 << 20) -> str:
     """SHA-256 fingerprint of a file's contents."""
     h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        while block := fh.read(chunk):
-            h.update(block)
+    try:
+        with open(path, "rb") as fh:
+            while block := fh.read(chunk):
+                h.update(block)
+    except PermissionError:
+        raise ReadError(
+            f"Cannot open {path}. If the file is open in Excel or another program, close it "
+            "and try again."
+        ) from None
     return h.hexdigest()
 
 

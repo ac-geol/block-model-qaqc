@@ -5,6 +5,9 @@
 project_name: "Example Project 2026 MRE"
 source_software: auto          # auto | datamine | isatis | leapfrog
 
+# Paths: forward slashes work on every system, including Windows (C:/Projects/model.csv).
+# If you use backslashes, put the path in SINGLE quotes: 'C:\Projects\model.csv'.
+# Double quotes would read "\P" or "\n" as special characters and break the path.
 paths:
   block_model_csv: ../data/block_model.csv
   composites_csv: ../data/composites.csv   # null if not available

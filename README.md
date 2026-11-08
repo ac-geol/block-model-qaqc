@@ -21,19 +21,45 @@ The full specification is in `block_model_qaqc_spec.md`. Choices made along the 
 
 ## Setup
 
+Works on Windows, macOS and Linux. Python 3.11 or newer is needed. The commands below call
+the project's own Python directly, so there is nothing to "activate" (this avoids the
+PowerShell script-permission error that activation can cause on work PCs).
+
+**Windows (PowerShell or Command Prompt)**
+
+```powershell
+uv venv --python 3.11 .venv
+uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
+```
+
+**macOS / Linux**
+
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
-or with conda: `conda env create -f environment.yml`.
+`uv` is a small installer ([install instructions](https://docs.astral.sh/uv/)); on Windows,
+`winget install --id=astral-sh.uv -e` also works. No `uv`? Use conda instead:
+`conda env create -f environment.yml`, then `conda activate bm_qaqc`.
+
+Below, `python` means the project's Python: `.venv\Scripts\python.exe` on Windows,
+`.venv/bin/python` on macOS and Linux (or plain `python` inside the conda environment).
+
+Tips for Windows:
+- In project YAML files, write paths with forward slashes (`C:/Projects/model.csv`) or in
+  single quotes if you use backslashes (see the note in `config/project_example.yaml`).
+- Close the CSV in Excel before running; Windows will not let two programs use it.
+- Keep the project and your data outside synced folders such as OneDrive if you can; syncing
+  can slow reading and lock the cache files.
+- Exports with decimal commas (for example `0,5`) are not supported yet.
 
 ## Use (so far)
 
 Check how the columns of a block model CSV are recognised:
 
-```bash
-.venv/bin/python -m qaqc schema path/to/block_model.csv --config config/project_example.yaml
+```
+python -m qaqc schema path/to/block_model.csv --config config/project_example.yaml
 ```
 
 Run the checks built so far (grid, geometry and density) from Python:
@@ -55,14 +81,16 @@ Rotated block models are not supported yet. The run stops with a message if one 
 
 Time the checks on a large made-up model (about 5 million blocks):
 
-```bash
-.venv/bin/python scripts/benchmark.py /tmp/qaqc_benchmark
 ```
+python scripts/benchmark.py qaqc_benchmark
+```
+
+(The folder name can be anything; it is created if needed and holds about 400 MB.)
 
 Run the tests:
 
-```bash
-.venv/bin/python -m pytest
+```
+python -m pytest
 ```
 
 ## Project settings
