@@ -12,8 +12,8 @@ The full specification is in `block_model_qaqc_spec.md`. Choices made along the 
 
 | Milestone | Content | State |
 |---|---|---|
-| M0 | Settings file, column recognition, header reading, synthetic test models | done, awaiting review |
-| M1 | Reading the data, placeholder clean-up, grid and rotation, geometry, density | next |
+| M0 | Settings file, column recognition, header reading, synthetic test models | done |
+| M1 | Reading the data, placeholder clean-up, grid set-up, geometry, density | done, awaiting review |
 | M2 | Grades, units, classification, resource statement, estimation support | |
 | M3 | Composites, bias, grade-tonnage curves, swaths | |
 | M4 | Flag export, figures, HTML report, audit file | |
@@ -34,6 +34,29 @@ Check how the columns of a block model CSV are recognised:
 
 ```bash
 .venv/bin/python -m qaqc schema path/to/block_model.csv --config config/project_example.yaml
+```
+
+Run the checks built so far (grid, geometry and density) from Python:
+
+```python
+from qaqc import config
+from qaqc.context import prepare
+from qaqc.modules import density, geometry
+
+ctx = prepare(config.load("config/my_project.yaml"))
+geometry.run(ctx)
+density.run(ctx)
+ctx.flags.counts()          # number of flagged blocks per check
+ctx.bundle["geometry"]      # grid, volume and tonnage results
+[w.message for w in ctx.warnings]
+```
+
+Rotated block models are not supported yet. The run stops with a message if one is found.
+
+Time the checks on a large made-up model (about 5 million blocks):
+
+```bash
+.venv/bin/python scripts/benchmark.py /tmp/qaqc_benchmark
 ```
 
 Run the tests:

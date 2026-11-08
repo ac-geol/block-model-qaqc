@@ -22,11 +22,11 @@ samples, which have not been supplied yet.
    7.2) would let one misplaced block at the edge shift the whole grid and make every other
    block look misplaced. Instead the origin is set from the grid position shared by most
    blocks, then the lowest such block. *(Built in milestone 1.)*
-6. **Rotation pivot.** The model rotates about the model corner when it is known (config,
-   header or Datamine origin columns). If no corner is known it rotates about (0, 0, 0) and
-   the corner is worked out afterwards in model coordinates. Rotation convention: azimuth is
-   the bearing of the model +Y axis, clockwise from grid north (see `qaqc/grid.py`). **To
-   verify** on a rotated real model in milestone 1.
+6. **Rotation pivot.** *(Set aside by decision 26: rotated models are not supported for now.)*
+   The model rotates about the model corner when it is known (config, header or Datamine
+   origin columns). If no corner is known it rotates about (0, 0, 0). Rotation convention:
+   azimuth is the bearing of the model +Y axis, clockwise from grid north (see
+   `qaqc/grid.py`).
 7. **Sub-block estimation support check (spec 7.2, check 6).** Only runs when
    `expected_estimation_support` is set. It works in both directions, parent by parent. If
    `parent` is declared, a parent whose sub-blocks have different grades is flagged. If
@@ -99,6 +99,57 @@ samples, which have not been supplied yet.
 25. **Code normalization** (`"1.0"` becomes `"1"`, text is stripped and uppercased) lives in
     `qaqc/config.py`, so the config and the data use the same rule. The text `"nan"` counts
     as missing.
+
+## Decided while building milestone 1 (8 Nov 2026)
+
+26. **Rotated models are not supported for now** (your decision, 8 Nov 2026: rotated models
+    do not occur in the files you use). If the project YAML or the file header gives a rotation
+    other than 0, the run stops with a plain message instead of giving wrong results. A dip or
+    plunge also stops the run, as the spec requires. If the coordinates in the file are already
+    in model space, `coords_are_local: true` lets the run go ahead. The rotation helpers stay in
+    `qaqc/grid.py`, so support can be added later. This drops the spec's milestone 1 goal of
+    confirming the rotation direction on a real rotated model. The model and real-world
+    coordinates are the same, so the spec's separate model-coordinate columns (`_XL, _YL, _ZL`)
+    are not created.
+27. **How placeholders are recognised.**
+    - Placeholder text is matched without regard to upper or lower case (`Outside`, `outside`
+      and `OUTSIDE` all count).
+    - Placeholder numbers (`-99`, `-999` ...) are not looked for in coordinate columns, because
+      an elevation of -99 m is a real place. The "too large" limit (`abs_threshold`) still
+      applies to coordinates.
+    - Placeholder text in domain and classification columns (for example `-`) also becomes
+      missing and is counted.
+28. **Order of clean-up.** Placeholder text is removed first, then other text is counted as
+    "not a number", then placeholder numbers are removed. The spec lists the "not a number"
+    step first, which would have counted `Outside` as "not a number" rather than as a
+    placeholder.
+29. **Reading the file.** The pyarrow CSV reader is used directly. Every column is read as text
+    and cleaned in batches. Pyarrow guesses each column's type from the first part of the file
+    and fails when text such as `Outside` appears further down; reading as text avoids this
+    and keeps memory use low. If pyarrow cannot read the file, the pandas reader is used and
+    gives the same result.
+30. **Blocks with selection = 0** (Isatis) are removed from the table after reading. Each row
+    keeps its position in the file (`_ROW`), so flags can be traced back to the file.
+31. **Working out the origin** (how decision 5 was built). Along each axis, the block corners
+    are compared with the parent cell size to find the grid position shared by most blocks.
+    The origin is the lowest block corner on that grid.
+32. **Working out the parent cell size** for a regular or percentage model with no block size
+    columns: the most common gap between neighbouring block centres along each axis.
+33. **Blocks with no X, Y or Z value** are left out of the grid checks and reported as an
+    error-level warning. The spec does not cover this case.
+34. **Sub-block grade check (spec 7.2, check 6).** Sub-blocks are grouped by parent cell and
+    domain, as the spec says. A group needs at least two sub-blocks with a grade to count. When
+    a group does not match the declared support, all of its non-air blocks are flagged.
+35. **Density table by domain.** The percentiles and standard deviation are volume-weighted,
+    like the mean. The spec only says "volume-weighted mean".
+36. **Percentage below topography (`topo_pct`)** uses the same 0-1 or 0-100 scale as the
+    percentage column.
+37. **Warning when most blocks are off the grid.** If more than half the blocks fail the
+    off-grid check, an error-level warning says the origin or parent cell size is probably
+    wrong. This makes a bad setting obvious instead of producing thousands of flags.
+38. **Isatis files with no X/Y/Z columns — to verify.** Block centres are rebuilt from the
+    header grid with X changing fastest, then Y, then Z (`sorting=+X +Y +Z`). The run stops if
+    the row count does not match the grid.
 
 ## Open — to settle in a later milestone
 
