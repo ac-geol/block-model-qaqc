@@ -3,8 +3,8 @@
 python -m qaqc schema <file.csv> [--config project.yaml] [--software datamine|isatis|leapfrog]
     Show which column was matched to what, for review.
 
-python -m qaqc run <project.yaml>
-    Run all checks and write the outputs (available from milestone 5).
+python -m qaqc run <project.yaml> [--no-cache]
+    Run all checks and write the outputs (flagged blocks CSV, audit bundle, report).
 """
 
 from __future__ import annotations
@@ -57,6 +57,38 @@ def _schema_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_command(args: argparse.Namespace) -> int:
+    from qaqc import pipeline  # noqa: PLC0415 (keeps `schema` fast to start)
+    from qaqc.display import USER_ERRORS  # noqa: PLC0415
+    from qaqc.export import ExportError  # noqa: PLC0415
+
+    try:
+        ctx, files = pipeline.run_project(args.config, use_cache=not args.no_cache)
+    except (*USER_ERRORS, ExportError) as err:
+        msg = err.args[0] if isinstance(err, KeyError) and err.args else err
+        print(f"\nThe run stopped:\n{msg}\n", file=sys.stderr)
+        return 2
+
+    counts = {n: c for n, c in ctx.flags.counts().items() if c}
+    by_sev = {s: sum(w.severity == s for w in ctx.warnings) for s in ("error", "warning", "info")}
+    print(f"\n{ctx.cfg.project_name}: {len(ctx.bm):,} blocks checked.")
+    print(f"Messages: {by_sev['error']} error(s), {by_sev['warning']} warning(s).")
+    for w in ctx.warnings:
+        if w.severity == "error":
+            print(f"  ERROR [{w.module}] {w.message}")
+    if counts:
+        print("\nFlagged blocks:")
+        for name, n in counts.items():
+            print(f"  {name:<34} {n:>10,}")
+    else:
+        print("\nNo blocks flagged.")
+    print("\nFiles written:")
+    for path in files.values():
+        print(f"  {path}")
+    print()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m qaqc",
@@ -71,8 +103,11 @@ def main(argv: list[str] | None = None) -> int:
     p_schema.add_argument("--config", type=Path, help="project YAML (for overrides and elements)")
     p_schema.add_argument("--software", choices=list(schema.SOFTWARE))
 
-    p_run = sub.add_parser("run", help="run all checks (available from milestone 5)")
+    p_run = sub.add_parser("run", help="run all checks and write the outputs")
     p_run.add_argument("config", type=Path)
+    p_run.add_argument(
+        "--no-cache", action="store_true", help="read the CSV again even if a cached copy exists"
+    )
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -81,8 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "schema":
         return _schema_command(args)
-    print("The full run is not built yet (milestone 5).", file=sys.stderr)
-    return 1
+    return _run_command(args)
 
 
 if __name__ == "__main__":

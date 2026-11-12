@@ -191,6 +191,9 @@ def build_bundle(ctx: AuditContext, files: dict[str, Path]) -> dict[str, Any]:
     n_rows = len(ctx.bm)
     n_flagged = int(ctx.flags.any().sum())
     inputs = [{"role": role, **info} for role, info in raw.get("inputs", {}).items()]
+    comp_input = raw.get("composites", {}).get("input")
+    if comp_input:
+        inputs.append({"role": "composites", **comp_input})
     schema = raw.get("schema") or ctx.schema.to_bundle()
 
     reserved = {"config", "schema", "inputs", "ingest", "timings", "grid", "flags", "metadata"}
