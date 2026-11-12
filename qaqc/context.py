@@ -1,7 +1,9 @@
 """Shared run context (spec 3, "Shared context") and the steps that build it.
 
 Every check module exposes ``run(ctx)`` and writes only to its own key in ``ctx.bundle``, to
-``ctx.flags``, ``ctx.figures`` and ``ctx.warnings``.
+``ctx.flags``, ``ctx.figures``, ``ctx.tables`` and ``ctx.warnings``. Modules run in this
+order: geometry, density, grades, classification, support, composites (geometry first: it
+adds ``_VOL`` and ``_TONNES``).
 """
 
 from __future__ import annotations
@@ -54,6 +56,9 @@ class AuditContext:
     bundle: dict[str, Any] = field(default_factory=dict)
     figures: dict[str, Any] = field(default_factory=dict)
     warnings: list[AuditWarning] = field(default_factory=list)
+    # Tables to write as CSV files by the export step: file stem -> DataFrame
+    # (e.g. "composite_domain_mismatch"). Modules add to it; only export writes files.
+    tables: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     def warn(self, severity: Severity, module: str, message: str) -> None:
         """Add a message for the report (also written to the log)."""
