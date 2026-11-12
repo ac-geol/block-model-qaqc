@@ -165,9 +165,61 @@ samples, which have not been supplied yet.
     `tests/synthetic.py`) so the notebook can be tried without real data. It only works
     inside this repository. A test runs the whole notebook in demo mode.
 
+## Decided while building milestones 2-4 (12 Nov 2026)
+
+42. **Shared helpers.** Units, thresholds in the column's unit, contained metal
+    (`qaqc/units.py`), and domain, waste, class rank, weights and "where is an element
+    estimated" (`qaqc/domains.py`) are worked out in one place so every module agrees.
+43. **Contained metal** is worked out after converting grades to the element's canonical unit
+    (tonnes of metal for percent elements, troy ounces for g/t, ppm and ppb). So a copper
+    column in ppm still gives tonnes of copper. No density column: no metal, with a note.
+44. **Thresholds in the results are in the column's unit**, and the unit is recorded beside
+    them.
+45. **"Unit likely wrong"**: a percent column with P99 above 100, or a ppm/g/t column of a
+    percent element (base metal) with P99 below 0.1. P99 over analysed blocks.
+46. **Grade tables by domain** include waste and domains the element is not estimated in.
+    These are labelled ("waste", "not estimated in domain") and not flagged.
+47. **Skipped grade checks** (null ceiling or cutoff, element not in the project file) are
+    listed per element by flag name; the flags are still registered with a count of 0.
+48. **`support.element: auto`** picks the configured element with the most estimation details
+    (ties: first listed), not simply the first with any. In Leapfrog exports gold may carry
+    only a sample count; picking it would skip every other support condition.
+49. **Resource statement**: blocks with grade at or above the cutoff (cutoff given in the
+    element's canonical unit and converted to the column's unit). Waste left out unless
+    `include_waste_in_statement`.
+50. **Pass and class breakdowns** include blocks with no pass value as "pass: none". "% of
+    row tonnes" is the share within that class or domain. Support statistics are
+    tonnes-weighted.
+51. **Composite domain check on percentage models**: a composite is a mismatch only if its
+    domain is not among the rows at that block centre. A composite whose label is swapped
+    inside a contact cell holding both domains is therefore not caught (the synthetic test
+    pins this: 3 of 4 planted swaps found in percentage models).
+52. **Composite containment** is tested against the 8 nearest block centres, then 64 for
+    composites not yet matched (needed for sub-blocked models). Air blocks are not tested,
+    so a composite in air counts as outside. Composites with no coordinates are counted
+    separately and are neither outside nor mismatched.
+53. **Bias table, grade-tonnage curves and swaths leave out negative grades and grades above
+    the ceiling.** These are errors flagged by the grades checks, not smoothing; a few
+    planted ones changed the bias by up to 200%. `FLAG_ABOVE_COMP_MAX` still uses all blocks.
+54. **Grade-tonnage cutoffs** start at the lowest grade of either model, then follow block
+    model grade quantiles up to P99. Both curves use only blocks where both values exist.
+55. **The computed nearest-neighbour model** uses every composite in the domain, including
+    ones flagged as outside or mismatched. `composites.caps` values are in the composites
+    file's units.
+56. **Export.** Flag share (`pct`) is of all rows read. `FLAG_REASONS` is built flag by flag
+    with numpy rather than the spec's `.dot` snippet (same result, less memory). The flagged
+    blocks file also carries `_ROW` (row number in the CSV) for tracing back.
+    Composite flags go to `flagged_composites.csv`; the full-model option writes
+    `model_flags.parquet` with every registered flag.
+57. **Audit bundle layout** follows spec 10 at the top level; each module's section is the
+    module's own result as built (it differs in places from the spec's sketch). Both input
+    files are listed with their SHA-256.
+58. **Run order.** `qaqc/pipeline.py` runs reading, the checks in a fixed order (geometry
+    first), the report, then the export (which lists the report). `python -m qaqc run`
+    uses it.
+
 ## Open — to settle in a later milestone
 
-- **Composite domain check on percentage models (milestone 3).** In a percentage model,
-  several rows share one block centre, one per domain, so "the block the composite sits in"
-  is ambiguous. Proposed: a composite is a mismatch only if its domain is not among the rows
-  at that block centre.
+- **Header layouts marked "to verify"** (Isatis, Leapfrog, Datamine IJK order) need real
+  export samples.
+- **Rotated models** are not supported yet (decision 26).
