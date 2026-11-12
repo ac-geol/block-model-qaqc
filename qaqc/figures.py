@@ -223,9 +223,14 @@ def density_vs_grade(ctx: AuditContext) -> go.Figure | None:
     )
     seen: set[str] = set()
     drawn = 0
+    not_shown = 0  # zero or negative grades cannot sit on a log axis
     for n, el in enumerate(elements):
         grade = bm[el].to_numpy(dtype=np.float64)
-        cand = np.flatnonzero(analysed & np.isfinite(sg) & np.isfinite(grade))
+        valid = analysed & np.isfinite(sg) & np.isfinite(grade)
+        with np.errstate(invalid="ignore"):
+            positive = grade > 0
+        not_shown += int((valid & ~positive).sum())
+        cand = np.flatnonzero(valid & positive)
         if not cand.size:
             continue
         keep = cand[downsample_indices(dom[cand], per_panel, seed=n)]
@@ -250,13 +255,20 @@ def density_vs_grade(ctx: AuditContext) -> go.Figure | None:
             )
             seen.add(str(code))
             drawn += int(m.size)
-        fig.update_xaxes(title_text=f"{el.upper()} grade", row=r + 1, col=c + 1)
+        fig.update_xaxes(
+            title_text=f"{el.upper()} grade, log scale", type="log", row=r + 1, col=c + 1
+        )
         fig.update_yaxes(title_text="Density (SG)" if c == 0 else None, row=r + 1, col=c + 1)
     if not drawn:
         return None
-    title = "Density against grade"
+    title = "Density against grade (grade on a log scale)"
+    notes = []
     if drawn >= per_panel:
-        title += f" (at most {per_panel:,} blocks per panel are drawn)"
+        notes.append(f"at most {per_panel:,} blocks per panel are drawn")
+    if not_shown:
+        notes.append(f"{not_shown:,} zero or negative grade(s) not shown")
+    if notes:
+        title += "<br><sub>" + "; ".join(notes) + "</sub>"
     return _base_layout(fig, title, height=380 * nrows + 60)
 
 

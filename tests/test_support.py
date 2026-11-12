@@ -108,6 +108,37 @@ def _internal(ctx, file_col):
     return inv[file_col]
 
 
+def test_models_without_kriging_details_run_cleanly(tmp_path):
+    """Many models carry pass, samples and holes but no KV, KE or slope of regression."""
+    import pandas as pd
+
+    from qaqc import pipeline
+    from qaqc.config import from_dict
+
+    m = make_model("sub_blocked", style="datamine")
+    m.write(tmp_path)
+    csv = tmp_path / "block_model.csv"
+    pd.read_csv(csv, dtype=str, keep_default_na=False).drop(columns=["KV", "KE", "SOR"]).to_csv(
+        csv, index=False
+    )
+    cfg = from_dict(m.config_dict(), base_dir=tmp_path)
+    ctx = pipeline.prepare(cfg, use_cache=False)
+    pipeline.run_checks(ctx)
+    files = pipeline.export.write_outputs(ctx, report_path=pipeline.write_report(ctx))
+
+    sup = ctx.bundle["support"]
+    assert not sup.get("skipped")
+    assert {"slope_reg", "kriging_eff", "kriging_var"} <= set(sup["source"]["missing_details"])
+    assert set(sup["low_support"]["by_condition"]) == {"nholes", "nsamples", "pass_num"}
+    skipped = {(s["condition"], s["reason"]) for s in sup["skipped_checks"]}
+    assert ("slope_reg", "detail not in model") in skipped
+    assert ("kriging_eff", "detail not in model") in skipped
+    assert not [w for w in ctx.warnings if w.severity == "error" and w.module == "support"]
+    assert not [w for w in ctx.warnings if "could not be drawn" in w.message]
+    assert "support_box" in ctx.figures or any(k.startswith("support") for k in ctx.figures)
+    assert "BM_QAQC_Report.html" in files
+
+
 def test_null_threshold_skipped(run_checks):
     m = make_model("regular", style="datamine")
     ctx = run_checks(

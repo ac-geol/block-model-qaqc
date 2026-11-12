@@ -121,6 +121,15 @@ def test_scatter_honours_max_scatter_points(tmp_path):
     assert sum(len(t.x) for t in ctx2.figures["density_vs_grade"].data) > n
 
 
+def test_density_vs_grade_log_axis(tmp_path):
+    ctx, _ = _run(tmp_path, "regular", "generic")
+    fig = ctx.figures["density_vs_grade"]
+    axes = [fig.layout[k] for k in fig.layout if k.startswith("xaxis")]
+    assert axes and all(a.type == "log" for a in axes)
+    assert all(min(t.x) > 0 for t in fig.data)  # zero and negative grades left off
+    assert "not shown" in fig.layout.title.text  # the planted negative grades are counted
+
+
 def test_no_composites_renders_with_skipped_notes(tmp_path):
     ctx, path = _run(tmp_path, settings={"paths": {"composites_csv": None}})
     text = path.read_text(encoding="utf-8")
