@@ -62,10 +62,10 @@ class StopRun(Exception):
 def setup_notebook() -> None:
     """Notebook display settings.
 
-    The checks' messages are shown in tables, so the log only prints real errors (otherwise
-    each message would also appear as red text under the cell).
+    The checks' messages are shown in tables, so the log is silenced (otherwise each message
+    would also appear as red text under the cell). Real failures still raise exceptions.
     """
-    logging.getLogger("qaqc").setLevel(logging.ERROR)
+    logging.getLogger("qaqc").setLevel(logging.CRITICAL)
     pd.set_option("display.max_rows", 200)
     pd.set_option("display.max_columns", 50)
     pd.set_option("display.max_colwidth", 120)
@@ -312,6 +312,174 @@ def density_vs_grade(ctx: AuditContext) -> pd.DataFrame:
     """Correlation between density and grade per element and domain."""
     rows = ctx.bundle["density"].get("density_vs_grade", [])
     return pd.DataFrame(rows).round(3) if rows else pd.DataFrame()
+
+
+def _records(rows: list[dict[str, Any]] | None, index: str | None = None) -> pd.DataFrame:
+    """Records (nested dicts allowed) as a table; ``grade.cu`` becomes ``cu grade``."""
+    if not rows:
+        return pd.DataFrame()
+    df = pd.json_normalize(rows)
+    df.columns = [
+        f"{c.split('.', 1)[1]} {c.split('.', 1)[0]}" if "." in c else c for c in df.columns
+    ]
+    df = df.round(3)
+    return df.set_index(index) if index and index in df.columns else df
+
+
+def skipped_note(ctx: AuditContext, module: str) -> pd.DataFrame:
+    """Why a module did not run (empty table if it ran)."""
+    r = ctx.bundle.get(module, {})
+    if r.get("skipped"):
+        return _table([("Skipped", r["skipped"])])
+    return pd.DataFrame()
+
+
+# --- grades ----------------------------------------------------------------------------------
+
+
+def grades_summary(ctx: AuditContext) -> pd.DataFrame:
+    """One row per element: column, unit, where it is estimated and the flag counts."""
+    rows = []
+    for el, r in ctx.bundle.get("grades", {}).get("elements", {}).items():
+        u, f = r["units"], r["flags"]
+        rows.append(
+            {
+                "Element": el.upper(),
+                "Column": r["column"],
+                "Unit": f"{u['unit']} ({u['unit_source']})"
+                + (" - LIKELY WRONG" if u.get("likely_wrong") else ""),
+                "Estimated in": ", ".join(r["applicable_domains"]) or "none",
+                "Not estimated in": ", ".join(r["not_estimated_domains"]) or "-",
+                "Negative": f["NEG"],
+                "Above ceiling": f["CEILING"],
+                "Unestimated": f["UNEST"],
+                "Waste bleed": f["BLEED"],
+                "Checks skipped": ", ".join(s["check"] for s in r["skipped_checks"]) or "-",
+            }
+        )
+    return pd.DataFrame(rows).set_index("Element") if rows else pd.DataFrame()
+
+
+def grades_by_domain(ctx: AuditContext, element: str) -> pd.DataFrame:
+    """Grade statistics by domain for one element (tonnes-weighted)."""
+    r = ctx.bundle.get("grades", {}).get("elements", {}).get(element.lower())
+    return _records(r["by_domain"] if r else None, "domain")
+
+
+# --- classification --------------------------------------------------------------------------
+
+
+def classification_summary(ctx: AuditContext) -> pd.DataFrame:
+    """Tonnes, grade and metal by class."""
+    return _records(ctx.bundle.get("classification", {}).get("by_class"), "class")
+
+
+def classification_inventory(ctx: AuditContext) -> pd.DataFrame:
+    """Domain x class: volume, tonnes, share of the domain, grades and metal."""
+    return _records(ctx.bundle.get("classification", {}).get("inventory"))
+
+
+def unmapped_codes(ctx: AuditContext) -> pd.DataFrame:
+    """Class codes not in the rank map (treated as unclassified)."""
+    return _records(ctx.bundle.get("classification", {}).get("unmapped_codes"), "code")
+
+
+def resource_statement(ctx: AuditContext) -> pd.DataFrame:
+    """The reproduced resource statement (by class, plus total), if a cutoff is set."""
+    rs = ctx.bundle.get("classification", {}).get("resource_statement")
+    if not rs:
+        return _table([("Resource statement", "not set (reporting: resource_cutoff)")])
+    if rs.get("skipped"):
+        return _table([("Resource statement", f"skipped: {rs['skipped']}")])
+    rows = list(rs["by_class"])
+    if rs.get("total"):
+        rows.append({"class": "Total", **rs["total"]})
+    return _records(rows, "class")
+
+
+# --- support ---------------------------------------------------------------------------------
+
+
+def support_low(ctx: AuditContext) -> pd.DataFrame:
+    """Measured / Indicated blocks failing each support condition."""
+    r = ctx.bundle.get("support", {})
+    if r.get("skipped"):
+        return skipped_note(ctx, "support")
+    rows = [
+        {
+            "Class": info["class"],
+            "Condition": cond,
+            "Limit": c["limit"],
+            "Blocks failing": c["failed"],
+            "Blocks with no value": c["missing"],
+        }
+        for info in r.get("low_support", {}).get("by_rank", {}).values()
+        for cond, c in info["conditions"].items()
+    ]
+    return pd.DataFrame(rows)
+
+
+def support_stats(ctx: AuditContext) -> pd.DataFrame:
+    """Estimation details (samples, holes, distances, slope ...) by class."""
+    rows = [
+        {"Class": s["class"], "Detail": d, **v}
+        for s in ctx.bundle.get("support", {}).get("stats_by_class", [])
+        for d, v in s["details"].items()
+    ]
+    return pd.DataFrame(rows).round(3).set_index(["Class", "Detail"]) if rows else pd.DataFrame()
+
+
+def support_passes(ctx: AuditContext) -> pd.DataFrame:
+    """Tonnes by class and search pass."""
+    pb = ctx.bundle.get("support", {}).get("pass_breakdown")
+    return _records(pb.get("by_class") if pb else None)
+
+
+# --- composites ------------------------------------------------------------------------------
+
+
+def composites_summary(ctx: AuditContext) -> pd.DataFrame:
+    """Composites read, capping, and how many sit outside the model or in the wrong domain."""
+    r = ctx.bundle.get("composites", {})
+    if not r.get("loaded"):
+        return _table([("Composites", r.get("skipped", "not run"))])
+    capping = ", ".join(f"{el.upper()}: {c['method']}" for el, c in r["capping"].items())
+    return _table(
+        [
+            ("Composites read", f"{r['input']['rows']:,}"),
+            ("Capping", capping or "-"),
+            ("Outside the model", f"{r['outside_count']:,}"),
+            ("Domain differs from the block", f"{r['mismatch_count']:,}"),
+            ("No coordinates", f"{r['no_coordinates_count']:,}"),
+            ("Nearest-neighbour benchmark", str(r.get("nn_source"))),
+        ]
+    )
+
+
+def bias_table(ctx: AuditContext) -> Styler | pd.DataFrame:
+    """Block model vs composites vs nearest-neighbour, coloured by status."""
+    df = _records(ctx.bundle.get("composites", {}).get("bias_table"))
+    if df.empty:
+        return df
+    colours = {"fail": SEVERITY_COLOURS["error"], "warn": SEVERITY_COLOURS["warning"]}
+
+    def colour(row: pd.Series) -> list[str]:
+        bg = colours.get(row["status"], "")
+        return [f"background-color: {bg}" if bg else "" for _ in row]
+
+    return df.style.apply(colour, axis=1).format(precision=3).hide(axis="index")
+
+
+def domain_matrix(ctx: AuditContext) -> pd.DataFrame:
+    """Composite domain (rows) against the domain of the block it sits in (columns)."""
+    rows = ctx.bundle.get("composites", {}).get("domain_matrix")
+    if not rows:
+        return pd.DataFrame()
+    return (
+        pd.DataFrame(rows)
+        .pivot_table(index="composite_domain", columns="block_domain", values="count", fill_value=0)
+        .astype(int)
+    )
 
 
 def warnings_table(ctx: AuditContext, module: str | None = None) -> Styler | pd.DataFrame:
