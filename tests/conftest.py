@@ -10,9 +10,15 @@ from synthetic import SyntheticModel
 
 from qaqc import config
 from qaqc.context import AuditContext, prepare
-from qaqc.modules import density, geometry
+from qaqc.modules import classification, density, geometry, grades, support
 
-MODULES = {"geometry": geometry, "density": density}
+MODULES = {
+    "geometry": geometry,
+    "density": density,
+    "grades": grades,
+    "classification": classification,
+    "support": support,
+}
 
 # (kind, style) pairs the generator supports
 KIND_STYLES = [
