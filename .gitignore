@@ -10,3 +10,4 @@ qaqc_outputs/
 .claude/settings.local.json
 qaqc_benchmark/
 demo_project/
+.claude/launch.json

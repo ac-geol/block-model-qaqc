@@ -73,9 +73,9 @@ def _run_command(args: argparse.Namespace) -> int:
     by_sev = {s: sum(w.severity == s for w in ctx.warnings) for s in ("error", "warning", "info")}
     print(f"\n{ctx.cfg.project_name}: {len(ctx.bm):,} blocks checked.")
     print(f"Messages: {by_sev['error']} error(s), {by_sev['warning']} warning(s).")
-    for w in ctx.warnings:
-        if w.severity == "error":
-            print(f"  ERROR [{w.module}] {w.message}")
+    for w in sorted(ctx.warnings, key=lambda w: w.severity != "error"):
+        if w.severity in ("error", "warning"):
+            print(f"  {w.severity.upper():<7} [{w.module}] {w.message}")
     if counts:
         print("\nFlagged blocks:")
         for name, n in counts.items():
@@ -110,8 +110,10 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    # `run` prints its own summary of the messages, so the log stays quiet unless --verbose.
+    quiet = logging.CRITICAL if args.command == "run" else logging.WARNING
     logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
+        level=logging.INFO if args.verbose else quiet,
         format="%(levelname)s %(name)s: %(message)s",
     )
     if args.command == "schema":

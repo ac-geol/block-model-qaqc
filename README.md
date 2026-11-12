@@ -14,10 +14,23 @@ The full specification is in `block_model_qaqc_spec.md`. Choices made along the 
 |---|---|---|
 | M0 | Settings file, column recognition, header reading, synthetic test models | done |
 | M1 | Reading the data, placeholder clean-up, grid set-up, geometry, density | done, awaiting review |
-| M2 | Grades, units, classification, resource statement, estimation support | |
-| M3 | Composites, bias, grade-tonnage curves, swaths | |
-| M4 | Flag export, figures, HTML report, audit file | |
-| M5 | Notebook, command line run, real model test | notebook started (grows with each milestone) |
+| M2 | Grades, units, classification, resource statement, estimation support | done, awaiting review |
+| M3 | Composites, bias, grade-tonnage curves, swaths | done, awaiting review |
+| M4 | Flag export, figures, HTML report, audit file | done, awaiting review |
+| M5 | Notebook, command line run, real model test | notebook and command line done; real model test to do |
+
+## Outputs
+
+Written to the output folder (`paths: output_dir` in the project file):
+
+| File | What it is |
+|---|---|
+| `BM_QAQC_Report.html` | Full report with tables and charts. Opens in any browser, works offline. |
+| `flagged_blocks_leapfrog.csv` | Every flagged block, to import into Leapfrog as points. |
+| `composite_domain_mismatch.csv` | Composites outside the model or in a different domain from their block. |
+| `flagged_composites.csv` | Composites with a flag. |
+| `audit_bundle.json` | Every result in one machine-readable file. |
+| `model_flags.parquet` | Every block and every flag (only with `export: full_model_flags: true`). |
 
 ## Setup
 
@@ -82,36 +95,42 @@ the file, it stops with a short message saying what to fix.
 
 ## Command line and Python (for scripting)
 
-Check how the columns of a block model CSV are recognised:
+Run everything and write all the outputs in one go:
+
+```
+python -m qaqc run config/my_project.yaml
+```
+
+It prints the errors and warnings, the flagged-block counts and the files written. Add
+`--no-cache` to read the CSV again, `-v` for detailed progress.
+
+Check how the columns of a block model CSV are recognised (fast; reads only the top):
 
 ```
 python -m qaqc schema path/to/block_model.csv --config config/project_example.yaml
 ```
 
-Run the checks built so far (grid, geometry and density) from Python:
+From Python:
 
 ```python
-from qaqc import config
-from qaqc.context import prepare
-from qaqc.modules import density, geometry
+from qaqc import pipeline
 
-ctx = prepare(config.load("config/my_project.yaml"))
-geometry.run(ctx)
-density.run(ctx)
+ctx, files = pipeline.run_project("config/my_project.yaml")
 ctx.flags.counts()          # number of flagged blocks per check
-ctx.bundle["geometry"]      # grid, volume and tonnage results
+ctx.bundle["composites"]    # results of one check (also in audit_bundle.json)
 [w.message for w in ctx.warnings]
 ```
 
 Rotated block models are not supported yet. The run stops with a message if one is found.
 
-Time the checks on a large made-up model (about 5 million blocks):
+Time the whole run on a large made-up model (about 5 million blocks, 100,000 composites):
 
 ```
 python scripts/benchmark.py qaqc_benchmark
 ```
 
-(The folder name can be anything; it is created if needed and holds about 400 MB.)
+(The folder name can be anything; it is created if needed and holds about 400 MB.) On the
+development PC this took about 1 minute reading the CSV and 45 seconds from the cached copy.
 
 Run the tests:
 

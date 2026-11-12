@@ -482,6 +482,20 @@ def domain_matrix(ctx: AuditContext) -> pd.DataFrame:
     )
 
 
+def write_outputs(ctx: AuditContext) -> pd.DataFrame:
+    """Write the HTML report and the export files; list what was written."""
+    from qaqc import export, report  # noqa: PLC0415
+
+    try:
+        report_path = report.write_report(ctx)
+        files = export.write_outputs(ctx, report_path=report_path)
+    except (export.ExportError, *USER_ERRORS) as err:
+        raise StopRun("writing the outputs", _message(err)) from None
+    return pd.DataFrame(
+        [{"File": name, "Folder": str(Path(p).parent)} for name, p in files.items()]
+    ).set_index("File")
+
+
 def warnings_table(ctx: AuditContext, module: str | None = None) -> Styler | pd.DataFrame:
     """Messages from the run, worst first, coloured by severity."""
     rows = [w.to_dict() for w in ctx.warnings if module is None or w.module == module]
