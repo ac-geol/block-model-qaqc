@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+:root { --ink:#1d2733; --muted:#5b6673; --line:#d9dfe6; --bg:#f6f8fa; --blue:#0072B2;
+        --ok-bg:#e3f4ea; --ok-fg:#146c37; --warn-bg:#fff2d6; --warn-fg:#8a5a00;
+        --bad-bg:#fbe0e0; --bad-fg:#a11919; --info-bg:#e8eef6; --info-fg:#2b4a6f; }
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.45 "Segoe UI",Helvetica,Arial,sans-serif; color:var(--ink); background:#fff; }
+header.top { background:var(--ink); color:#fff; padding:18px 28px; }
+header.top h1 { margin:0 0 4px; font-size:22px; font-weight:600; }
+header.top p { margin:0; color:#c9d3df; }
+nav.tabs { display:none; position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--line); padding:0 20px; }
+.js nav.tabs { display:flex; flex-wrap:wrap; }
+nav.tabs button { border:0; background:none; padding:12px 14px; font:inherit; color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; }
+nav.tabs button:hover { color:var(--ink); }
+nav.tabs button.active { color:var(--blue); border-bottom-color:var(--blue); font-weight:600; }
+main { padding:8px 28px 40px; max-width:1500px; }
+.js .panel { display:none; }
+.js .panel.active { display:block; }
+h2 { font-size:20px; margin:22px 0 4px; padding-bottom:6px; border-bottom:2px solid var(--line); }
+h3 { font-size:16px; margin:26px 0 6px; }
+h4 { font-size:14px; margin:18px 0 4px; color:var(--muted); }
+p.note { margin:2px 0 8px; color:var(--muted); max-width:110ch; }
+p.skipped { margin:8px 0; padding:10px 14px; background:var(--info-bg); color:var(--info-fg); border-left:4px solid var(--info-fg); }
+.kpis { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+.kpi { border:1px solid var(--line); border-radius:6px; padding:8px 14px; min-width:130px; background:var(--bg); }
+.kpi .v { font-size:20px; font-weight:600; }
+.kpi .l { font-size:12px; color:var(--muted); }
+.kpi.ok .v { color:var(--ok-fg); } .kpi.warn .v { color:var(--warn-fg); } .kpi.bad .v { color:var(--bad-fg); }
+.badges { display:flex; flex-direction:column; gap:6px; margin:8px 0; }
+.badge { display:inline-block; padding:6px 12px; border-radius:4px; max-width:120ch; }
+.badge.ok, td.ok { background:var(--ok-bg); color:var(--ok-fg); }
+.badge.warn, td.warn { background:var(--warn-bg); color:var(--warn-fg); }
+.badge.bad, td.bad { background:var(--bad-bg); color:var(--bad-fg); font-weight:600; }
+.badge.info, td.info { background:var(--info-bg); color:var(--info-fg); }
+.tablewrap { overflow:auto; max-height:520px; margin:6px 0 14px; border:1px solid var(--line); }
+table { border-collapse:collapse; width:100%; font-size:13px; }
+th, td { padding:5px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+td { font-variant-numeric:tabular-nums; }
+thead th { position:sticky; top:0; background:var(--bg); z-index:1; white-space:nowrap; }
+table.sortable thead th { cursor:pointer; }
+table.sortable thead th:hover { background:#e9eef4; }
+th.asc::after { content:" \25B2"; font-size:10px; } th.desc::after { content:" \25BC"; font-size:10px; }
+table.kv { width:auto; min-width:50%; } table.kv th { background:none; position:static; font-weight:600; white-space:normal; }
+table.kv { margin:6px 0 14px; border:1px solid var(--line); }
+details { margin:10px 0; } summary { cursor:pointer; color:var(--blue); }
+pre { background:var(--bg); padding:10px; overflow:auto; max-height:360px; font-size:12px; border:1px solid var(--line); white-space:pre-wrap; word-break:break-all; }
+.plot { width:100%; min-height:300px; margin:6px 0 14px; }
+.selector { margin:8px 0 4px; } .selector select { font:inherit; padding:4px 8px; }
+code, .mono { font-family:Consolas,monospace; font-size:12px; }
+@media print {
+  nav.tabs { display:none !important; }
+  .js .panel { display:block !important; page-break-before:always; }
+  .js .panel:first-of-type { page-break-before:auto; }
+  .tablewrap { max-height:none; overflow:visible; }
+  header.top { background:#fff; color:#000; border-bottom:2px solid #000; }
+  header.top p { color:#333; }
+  .plot { break-inside:avoid; }
+}
+</style>
+{{ plotly_script }}
+</head>
+<body>
+<script>document.documentElement.className += " js";</script>
+<header class="top">
+  <h1>Block model QA/QC report</h1>
+  <p>{{ project }} &middot; run {{ run_time }} &middot; qaqc version {{ version }} &middot; {{ "{:,}".format(n_flagged) }} block(s) flagged</p>
+</header>
+<nav class="tabs" role="tablist">
+{% for t in tabs %}
+  <button type="button" data-tab="{{ t.id }}" role="tab">{{ t.title }}</button>
+{% endfor %}
+</nav>
+<main>
+{% macro cell(x) %}{% if x is mapping %}{{ x.text }}{% else %}{{ x }}{% endif %}{% endmacro %}
+{% macro tcls(x) %}{% if x is mapping and x.cls %} class="{{ x.cls }}"{% endif %}{% endmacro %}
+{% for t in tabs %}
+<section class="panel" id="tab-{{ t.id }}">
+<h2>{{ t.title }}</h2>
+{% for b in t.blocks %}
+{% if b.type == "h3" %}<h3>{{ b.text }}</h3>
+{% elif b.type == "h4" %}<h4>{{ b.text }}</h4>
+{% elif b.type == "note" %}<p class="note">{{ b.text }}</p>
+{% elif b.type == "skipped" %}<p class="skipped">{{ b.text }}</p>
+{% elif b.type == "kpis" %}
+<div class="kpis">{% for k in b["items"] %}<div class="kpi {{ k.cls or '' }}"><div class="v">{{ k.value }}</div><div class="l">{{ k.label }}</div></div>{% endfor %}</div>
+{% elif b.type == "badges" %}
+<div class="badges">{% for k in b["items"] %}<div class="badge {{ k.cls }}">{{ k.text }}</div>{% endfor %}</div>
+{% elif b.type == "details" %}
+<details><summary>{{ b.summary }}</summary><pre>{{ b.text }}</pre></details>
+{% elif b.type == "kv" %}
+<table class="kv"><tbody>
+{% for k, v in b.rows %}<tr><th>{{ k }}</th><td{{ tcls(v) }}>{{ cell(v) }}</td></tr>
+{% endfor %}</tbody></table>
+{% elif b.type == "table" %}
+<div class="tablewrap"><table class="sortable">
+<thead><tr>{% for col in b.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+<tbody>
+{% for row in b.rows %}<tr>{% for v in row %}<td{{ tcls(v) }}>{{ cell(v) }}</td>{% endfor %}</tr>
+{% endfor %}</tbody></table></div>
+{% elif b.type == "figure" %}
+<div class="plot" data-fig="{{ b.id }}" role="img" aria-label="{{ b.alt }}"></div>
+{% elif b.type == "selector" %}
+<div class="selector"><label>{{ b.label }}: <select data-selector="{{ b.key }}">
+{% for o in b.options %}<option value="{{ o.id }}">{{ o.label }}</option>{% endfor %}
+</select></label></div>
+<div class="plot" data-selector-plot="{{ b.key }}"></div>
+{% endif %}
+{% endfor %}
+</section>
+{% endfor %}
+</main>
+{% for fid, text in figure_json.items() %}
+<script type="application/json" id="data-{{ fid }}">{{ text | safe }}</script>
+{% endfor %}
+{% raw %}
+<script>
+(function () {
+  var panels = Array.prototype.slice.call(document.querySelectorAll('.panel'));
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('nav.tabs button'));
+  var config = {responsive: true, displaylogo: false};
+
+  function draw(div, fid) {
+    var raw = document.getElementById('data-' + fid);
+    if (!raw || typeof Plotly === 'undefined') { return; }
+    var fig = JSON.parse(raw.textContent);
+    div.dataset.drawn = fid;
+    Plotly.react(div, fig.data, fig.layout, config);
+  }
+  function drawPanel(panel) {
+    Array.prototype.forEach.call(panel.querySelectorAll('.plot'), function (div) {
+      if (div.dataset.fig && !div.dataset.drawn) { draw(div, div.dataset.fig); }
+      if (div.dataset.selectorPlot && !div.dataset.drawn) {
+        var sel = panel.querySelector('select[data-selector="' + div.dataset.selectorPlot + '"]');
+        if (sel) { draw(div, sel.value); }
+      }
+      if (div.dataset.drawn && typeof Plotly !== 'undefined') { Plotly.Plots.resize(div); }
+    });
+  }
+  function show(id) {
+    panels.forEach(function (p) { p.classList.toggle('active', p.id === 'tab-' + id); });
+    buttons.forEach(function (b) { b.classList.toggle('active', b.dataset.tab === id); });
+    var panel = document.getElementById('tab-' + id);
+    if (panel) { drawPanel(panel); }
+    try { history.replaceState(null, '', '#' + id); } catch (e) {}
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.tab); }); });
+  Array.prototype.forEach.call(document.querySelectorAll('select[data-selector]'), function (sel) {
+    sel.addEventListener('change', function () {
+      var div = document.querySelector('[data-selector-plot="' + sel.dataset.selector + '"]');
+      if (div) { draw(div, sel.value); }
+    });
+  });
+  var start = (location.hash || '').slice(1);
+  show(buttons.some(function (b) { return b.dataset.tab === start; }) ? start : buttons[0].dataset.tab);
+
+  window.addEventListener('beforeprint', function () { panels.forEach(drawPanel); });
+
+  // click a column heading to sort (numbers as numbers, text as text; missing values last)
+  function value(td) {
+    var t = td.textContent.trim();
+    var n = parseFloat(t.replace(/[,%\s]/g, ''));
+    return isNaN(n) || t === '–' ? {n: null, t: t.toLowerCase()} : {n: n, t: t.toLowerCase()};
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('table.sortable'), function (table) {
+    Array.prototype.forEach.call(table.querySelectorAll('thead th'), function (th, col) {
+      th.addEventListener('click', function () {
+        var dir = th.classList.contains('asc') ? -1 : 1;
+        Array.prototype.forEach.call(th.parentNode.children, function (x) { x.classList.remove('asc', 'desc'); });
+        th.classList.add(dir === 1 ? 'asc' : 'desc');
+        var body = table.tBodies[0];
+        var rows = Array.prototype.slice.call(body.rows);
+        rows.sort(function (a, b) {
+          var x = value(a.cells[col]), y = value(b.cells[col]);
+          if (x.n === null && y.n === null) { return dir * x.t.localeCompare(y.t); }
+          if (x.n === null) { return 1; }
+          if (y.n === null) { return -1; }
+          return dir * (x.n - y.n);
+        });
+        rows.forEach(function (r) { body.appendChild(r); });
+      });
+    });
+  });
+})();
+</script>
+{% endraw %}
+</body>
+</html>
