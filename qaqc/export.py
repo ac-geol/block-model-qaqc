@@ -30,6 +30,7 @@ import pyarrow.parquet as pq
 
 import qaqc
 from qaqc.context import jsonable
+from qaqc.domains import class_ranks
 from qaqc.flags import FlagRegistry
 
 if TYPE_CHECKING:
@@ -54,7 +55,6 @@ _BLOCK_COLUMNS = {
     "domain": "DOMAIN",
     "classif": "CLASSIF",
 }
-_RANK_COLUMNS = ("_RANK", "_CLASS_RANK", "class_rank")
 _PACKAGES = ("pandas", "numpy", "scipy", "pyarrow", "pydantic", "plotly", "jinja2", "pyyaml")
 
 
@@ -121,10 +121,8 @@ def flagged_blocks(ctx: AuditContext, only_flagged: bool = True) -> pd.DataFrame
             if col is None:
                 col = bm[std].iloc[rows].astype(object).to_numpy()
             data[name] = col
-    for rank_col in _RANK_COLUMNS:
-        if rank_col in bm.columns:
-            data["CLASS_RANK"] = bm[rank_col].to_numpy()[rows]
-            break
+    if "classif" in bm.columns:
+        data["CLASS_RANK"] = class_ranks(bm, ctx.cfg)[0][rows]
     for el, es in ctx.schema.elements.items():
         if el in bm.columns:
             data[es.primary] = bm[el].to_numpy()[rows]

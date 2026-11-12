@@ -33,7 +33,8 @@ def test_flagged_csv(ctx):
     mask = ctx.flags.any()
     assert len(df) == int(mask.sum())
     assert df["_ROW"].tolist() == ctx.bm["_ROW"].to_numpy()[mask].tolist()
-    assert {"X", "Y", "Z", "DOMAIN", "FLAG_COUNT", "FLAG_REASONS"} <= set(df.columns)
+    assert {"X", "Y", "Z", "DOMAIN", "CLASS_RANK", "FLAG_COUNT", "FLAG_REASONS"} <= set(df.columns)
+    assert set(df["CLASS_RANK"]) <= {0, 1, 2, 3}
     np.testing.assert_allclose(df["X"], ctx.bm["x"].to_numpy()[mask])
     for name, n in ctx.flags.counts().items():
         if n:
