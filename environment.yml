@@ -13,6 +13,10 @@ dependencies:
   - pydantic>=2
   - pytest
   - ruff
+  - jupyterlab
+  - ipykernel
+  - nbclient
+  - nbformat
   - pip
   - pip:
       - -e .

@@ -9,3 +9,8 @@ pydantic>=2
 # development
 pytest
 ruff
+nbclient
+nbformat
+ipykernel
+# notebook
+jupyterlab

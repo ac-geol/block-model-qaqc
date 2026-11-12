@@ -19,7 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "nbclient", "nbformat", "ipykernel"]
+notebook = ["jupyterlab", "ipykernel"]
 
 [tool.setuptools.packages.find]
 include = ["qaqc*"]

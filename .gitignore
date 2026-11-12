@@ -9,3 +9,4 @@ qaqc_outputs/
 .DS_Store
 .claude/settings.local.json
 qaqc_benchmark/
+demo_project/

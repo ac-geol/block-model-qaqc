@@ -151,6 +151,20 @@ samples, which have not been supplied yet.
     header grid with X changing fastest, then Y, then Z (`sorting=+X +Y +Z`). The run stops if
     the row count does not match the grid.
 
+## Decided after milestone 1 (12 Nov 2026)
+
+39. **Notebook built early.** The notebook (`notebooks/block_model_qaqc.ipynb`, spec M5) was
+    built after M1 because the command line was hard to use for day-to-day runs. It follows
+    the spec's cell list; steps not built yet are shown as placeholders and are filled in as
+    each milestone lands. Display tables live in `qaqc/display.py`, so the notebook holds no
+    analysis logic.
+40. **Short messages for user errors in the notebook.** Settings, column-matching, reading
+    and grid errors stop the notebook with a plain message (no Python traceback). Other errors
+    still show the full traceback, since they are likely bugs.
+41. **Demo mode.** `qaqc/demo.py` writes a small made-up model with planted problems (from
+    `tests/synthetic.py`) so the notebook can be tried without real data. It only works
+    inside this repository. A test runs the whole notebook in demo mode.
+
 ## Open — to settle in a later milestone
 
 - **Composite domain check on percentage models (milestone 3).** In a percentage model,

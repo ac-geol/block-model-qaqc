@@ -17,7 +17,7 @@ The full specification is in `block_model_qaqc_spec.md`. Choices made along the 
 | M2 | Grades, units, classification, resource statement, estimation support | |
 | M3 | Composites, bias, grade-tonnage curves, swaths | |
 | M4 | Flag export, figures, HTML report, audit file | |
-| M5 | Notebook, command line run, real model test | |
+| M5 | Notebook, command line run, real model test | notebook started (grows with each milestone) |
 
 ## Setup
 
@@ -29,15 +29,17 @@ PowerShell script-permission error that activation can cause on work PCs).
 
 ```powershell
 uv venv --python 3.11 .venv
-uv pip install --python .venv\Scripts\python.exe -e ".[dev]"
+uv pip install --python .venv\Scripts\python.exe -e ".[dev,notebook]"
 ```
 
 **macOS / Linux**
 
 ```bash
 uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -e ".[dev]"
+uv pip install --python .venv/bin/python -e ".[dev,notebook]"
 ```
+
+(`notebook` installs JupyterLab for the notebook below; leave it out if you use VS Code.)
 
 `uv` is a small installer ([install instructions](https://docs.astral.sh/uv/)); on Windows,
 `winget install --id=astral-sh.uv -e` also works. No `uv`? Use conda instead:
@@ -54,7 +56,31 @@ Tips for Windows:
   can slow reading and lock the cache files.
 - Exports with decimal commas (for example `0,5`) are not supported yet.
 
-## Use (so far)
+## Running the checks: the notebook
+
+The easiest way to run everything is the notebook `notebooks/block_model_qaqc.ipynb`. It runs
+each step in order, with a short note on what it does and what to check, and shows the results
+as tables.
+
+**Open it in JupyterLab:**
+
+```powershell
+.venv\Scripts\jupyter-lab.exe notebooks/block_model_qaqc.ipynb
+```
+
+(macOS / Linux: `.venv/bin/jupyter-lab notebooks/block_model_qaqc.ipynb`.) A browser tab
+opens. Use **Run → Run All Cells**.
+
+**Or open it in VS Code:** open the file, click **Select Kernel** at the top right, choose the
+`.venv` Python, then **Run All**. VS Code needs its Python and Jupyter extensions.
+
+The notebook starts in **demo mode**: it makes a small made-up model with known problems, so
+you can see every step working before using real data. To use your own model, copy
+`config/project_example.yaml`, set the paths in it, then in Step 0 of the notebook set
+`DEMO = False` and `CONFIG_PATH` to your file. If a step finds a problem with the settings or
+the file, it stops with a short message saying what to fix.
+
+## Command line and Python (for scripting)
 
 Check how the columns of a block model CSV are recognised:
 
