@@ -86,7 +86,7 @@ def _volume(ctx: AuditContext) -> np.ndarray:
 
 
 def _duplicates(ctx: AuditContext, rows: np.ndarray) -> np.ndarray:
-    bm, snap = ctx.bm, ctx.cfg.tolerances.coord_snap_m
+    bm, snap = ctx.bm, ctx.cfg.tolerances.coord_snap
     keys = {
         axis: np.round((bm[axis].to_numpy(dtype=np.float64)[rows] - o) / snap).astype(np.int64)
         for axis, o in zip(("x", "y", "z"), ctx.grid.origin, strict=True)
@@ -99,7 +99,7 @@ def _duplicates(ctx: AuditContext, rows: np.ndarray) -> np.ndarray:
 
 
 def _off_grid(ctx: AuditContext, rows: np.ndarray) -> np.ndarray:
-    bm, grid, snap = ctx.bm, ctx.grid, ctx.cfg.tolerances.coord_snap_m
+    bm, grid, snap = ctx.bm, ctx.grid, ctx.cfg.tolerances.coord_snap
     out = np.zeros(len(bm), dtype=bool)
     sizes = _sizes(ctx)
     for n, (axis, idx, o, step) in enumerate(
@@ -198,8 +198,8 @@ def run(ctx: AuditContext) -> None:
             ctx.warn(
                 "error",
                 MODULE,
-                "No density column was found, so tonnes cannot be worked out. Results that "
-                "should be weighted by tonnes are weighted by volume instead.",
+                "No density column was found, so tonnage cannot be worked out. Results that "
+                "should be weighted by tonnage are weighted by volume instead.",
             )
 
         # --- duplicates and off-grid -------------------------------------------------------
@@ -266,9 +266,9 @@ def run(ctx: AuditContext) -> None:
                 table.append(
                     {
                         "domain": code,
-                        "model_volume_m3": model_vol,
-                        "wireframe_volume_m3": float(target),
-                        "difference_m3": diff,
+                        "model_volume": model_vol,
+                        "wireframe_volume": float(target),
+                        "difference_volume": diff,
                         "difference_pct": diff / target * 100.0 if target else float("nan"),
                     }
                 )
@@ -279,7 +279,7 @@ def run(ctx: AuditContext) -> None:
         result["bounding_box"] = _bounding_box(ctx, has_cell)
         result["bounding_box_note"] = "Unrotated model: model and real-world boxes are the same."
         result["parent_cells"] = n_parents
-        result["total_volume_m3"] = float(np.nansum(vol[analysed]))
+        result["total_volume"] = float(np.nansum(vol[analysed]))
         result["total_tonnes"] = float(np.nansum(tonnes[analysed]))
         result["blocks_analysed"] = int(analysed.sum())
         result["blocks_without_tonnes"] = int((analysed & ~np.isfinite(tonnes)).sum())

@@ -3,8 +3,11 @@
 python -m qaqc schema <file.csv> [--config project.yaml] [--software datamine|isatis|leapfrog]
     Show which column was matched to what, for review.
 
-python -m qaqc run <project.yaml> [--no-cache]
-    Run all checks and write the outputs (flagged blocks CSV, audit bundle, report).
+python -m qaqc run <settings.yaml> [--no-cache] [--open]
+    Run all checks and write the outputs (report, flagged blocks CSV, audit file).
+
+python -m qaqc demo [folder] [--open]
+    Make a small made-up model with known problems and run every check on it.
 """
 
 from __future__ import annotations
@@ -57,11 +60,42 @@ def _schema_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _open_report(files: dict[str, Path]) -> None:
+    import webbrowser  # noqa: PLC0415
+
+    for path in files.values():
+        if Path(path).suffix.lower() == ".html":
+            webbrowser.open(Path(path).resolve().as_uri())
+            print(f"Opening the report in your web browser: {path}\n")
+            return
+
+
+def _demo_command(args: argparse.Namespace) -> int:
+    from qaqc.demo import REPO_ROOT, make_demo_project  # noqa: PLC0415
+
+    folder = Path(args.folder) if args.folder else REPO_ROOT / "demo_project"
+    try:
+        config_path = make_demo_project(folder)
+    except FileNotFoundError as err:
+        print(f"\nThe demo could not start:\n{err}\n", file=sys.stderr)
+        return 2
+    print(f"\nDemo: a made-up block model with known problems was written to {folder}")
+    args.config, args.no_cache = config_path, True
+    return _run_command(args)
+
+
 def _run_command(args: argparse.Namespace) -> int:
     from qaqc import pipeline  # noqa: PLC0415 (keeps `schema` fast to start)
     from qaqc.display import USER_ERRORS  # noqa: PLC0415
     from qaqc.export import ExportError  # noqa: PLC0415
 
+    if not Path(args.config).is_file():
+        print(
+            f"\nThe settings file was not found: {args.config}\n"
+            "Check the path. If it contains spaces, put it in double quotes.\n",
+            file=sys.stderr,
+        )
+        return 2
     try:
         ctx, files = pipeline.run_project(args.config, use_cache=not args.no_cache)
     except (*USER_ERRORS, ExportError) as err:
@@ -86,6 +120,8 @@ def _run_command(args: argparse.Namespace) -> int:
     for path in files.values():
         print(f"  {path}")
     print()
+    if getattr(args, "open", False):
+        _open_report(files)
     return 0
 
 
@@ -108,16 +144,23 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument(
         "--no-cache", action="store_true", help="read the CSV again even if a cached copy exists"
     )
+    p_run.add_argument("--open", action="store_true", help="open the report when finished")
+
+    p_demo = sub.add_parser("demo", help="run every check on a small made-up model")
+    p_demo.add_argument("folder", nargs="?", help="where to write the demo (default: demo_project)")
+    p_demo.add_argument("--open", action="store_true", help="open the report when finished")
 
     args = parser.parse_args(argv)
     # `run` prints its own summary of the messages, so the log stays quiet unless --verbose.
-    quiet = logging.CRITICAL if args.command == "run" else logging.WARNING
+    quiet = logging.CRITICAL if args.command in ("run", "demo") else logging.WARNING
     logging.basicConfig(
         level=logging.INFO if args.verbose else quiet,
         format="%(levelname)s %(name)s: %(message)s",
     )
     if args.command == "schema":
         return _schema_command(args)
+    if args.command == "demo":
+        return _demo_command(args)
     return _run_command(args)
 
 

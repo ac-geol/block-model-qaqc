@@ -24,7 +24,7 @@ class FlagInfo:
 
 
 class FlagRegistry:
-    """Yes/no markers on the rows of one table (block model or composites)."""
+    """Yes/no markers on the rows of the block model."""
 
     def __init__(self, n_rows: int) -> None:
         self.n_rows = int(n_rows)

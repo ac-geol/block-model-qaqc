@@ -1,128 +1,83 @@
-# Example project configuration for the block model QA/QC checks.
-# Copy this file for each project and edit the values. Relative paths are read from the
-# folder that holds this file. Any setting not listed in this file is rejected as a typo.
+# =============================================================================================
+# Block model QA/QC: project settings
+# =============================================================================================
+# Copy this file for each project, give it a new name (for example my_project.yaml) and change
+# the values. Lines starting with # are notes and are ignored.
+#
+# These are the only settings most projects need. Everything else has a sensible default. The
+# full list, with explanations, is in advanced_settings_reference.yaml in this folder.
+#
+# Writing paths: use forward slashes, also on Windows, for example
+#   C:/Projects/MRE/block_model.csv
+# A path that does not start with a drive letter is read from the folder this file is in.
 
 project_name: "Example Project 2026 MRE"
-source_software: auto          # auto | datamine | isatis | leapfrog
 
-# Paths: forward slashes work on every system, including Windows (C:/Projects/model.csv).
-# If you use backslashes, put the path in SINGLE quotes: 'C:\Projects\model.csv'.
-# Double quotes would read "\P" or "\n" as special characters and break the path.
+# metric:   coordinates and block sizes in metres, density in t/m3 (same number as the
+#           specific gravity), tonnage in tonnes, precious metals in g/t
+# imperial: coordinates and block sizes in feet, density in short tons per cubic foot,
+#           tonnage in short tons, precious metals in oz/ton (troy ounces per short ton)
+units: metric
+
 paths:
-  block_model_csv: ../data/block_model.csv
-  composites_csv: ../data/composites.csv   # null if not available
-  output_dir: ../qaqc_outputs/
-  cache_dir: ../.qaqc_cache/
-  extra_aliases: null          # optional YAML file adding extra column-name aliases
+  block_model_csv: ../data/block_model.csv   # the block model export (CSV file)
+  output_dir: ../qaqc_outputs/                # the report and other results are written here
 
-column_overrides: {}           # standard name -> CSV column; always beats automatic matching
-  # examples:
-  # domain: "EST_DOMAIN"
-  # cu.primary: "CU_OK_FINAL"
-  # cu.nn: "CU_NN"
-  # cu.nsamples: "OK_CU_NS"
-  # pass_num: "SVOL"
-
-model:
-  model_type: auto             # auto | regular | sub_blocked | percentage
-  parent_cell_size: null       # [DX, DY, DZ]; null = from file header, else worked out from the blocks
-  grid_origin: null            # model CORNER [X0, Y0, Z0] in real-world coordinates; null = header, Datamine origin columns, then worked out
-  rotation:
-    azimuth_deg: null          # bearing of the model +Y axis, clockwise from grid north; null = header, else 0
-  coords_are_local: false      # true if the CSV coordinates are already in model (rotated) space
-  pct_scale: auto              # auto | fraction | percent
-  volume_factors: [pct]        # percentage models: columns multiplied into the parent volume, e.g. [pct, topo_pct]
-  expected_estimation_support: null   # null | parent | subblock (sub-blocked models)
-  subblock_grid_check: false   # true for regular sub-block grids (e.g. Leapfrog); false for free sub-cells (e.g. Datamine)
-
-sentinels:                     # placeholder values treated as "no value"
-  numeric: [-99, -999, -9999, -1.0e30, 1.0e30]
-  abs_threshold: 1.0e20        # any value this large (positive or negative) is treated as "no value"
-  strings: ["", "-", "*", "N/A", "NA", "null", "empty", "Outside", "Without value", "Blank", "Error"]
-
+# Domain codes that are waste or air. Air blocks are only used in the grid checks.
 domains:
   waste_codes: ["0", "99", "999", "WASTE", "OVB", "UNMIN"]
-  air_codes: ["AIR"]           # left out of all volume, tonnage and statistics
-  selection_excludes_zero: true   # Isatis-style selection column: rows with 0 are left out
+  air_codes: ["AIR"]
 
+# Which classification codes in the file mean what. A code that is not listed is counted
+# as Unclassified and reported, so you can add it here.
+# Exploration Target (ET) blocks are shown as their own class. They are not part of the
+# resource total and are not flagged as "unclassified but mineralised".
 classification:
-  # Classification code -> rank. 3 = Measured, 2 = Indicated, 1 = Inferred, 0 = Unclassified.
-  # Blank or unlisted codes are treated as rank 0 and reported as a warning.
-  rank_map:
-    "1": 3
-    "MEAS": 3
-    "MEASURED": 3
-    "2": 2
-    "IND": 2
-    "INDICATED": 2
-    "3": 1
-    "INF": 1
-    "INFERRED": 1
-    "0": 0
-    "4": 0
-    "99": 0
-    "UNCLASS": 0
-    "UNCLASSIFIED": 0
-    "NONE": 0
-  rank_labels: {3: Measured, 2: Indicated, 1: Inferred, 0: Unclassified}
+  measured: ["1", "MEAS", "MEASURED"]
+  indicated: ["2", "IND", "INDICATED"]
+  inferred: ["3", "INF", "INFERRED"]
+  exploration_target: ["4", "ET", "EXPLORATION TARGET"]
+  unclassified: ["0", "99", "UNCLASS", "UNCLASSIFIED", "NONE"]
 
+# One line per element. Elements found in the file but not listed here are still checked,
+# just without a ceiling or cutoff.
+#   column:  the grade column in the file. Leave it out and the tool finds it from the
+#            column names (it stops and asks if two columns could be the grade).
+#   unit:    pct, ppm, ppb, gpt (g/t) or opt (oz/ton). Leave it out and the tool reads it
+#            from the column name (for example CU_PCT, AU_GPT, AU_OPT).
+#   ceiling: the highest believable grade. Blocks above it are flagged.
+#   cutoff:  the grade that counts as mineralised. Waste blocks and Unclassified blocks
+#            at or above it are flagged (Exploration Target blocks are not).
+#   ceiling and cutoff are in the element's unit.
 elements:
-  # unit: auto | pct | ppm | ppb | gpt. ceiling and diagnostic_cutoff are in the element's
-  # canonical unit (pct for base metals, gpt for precious metals) and are converted to the
-  # column's unit when the checks run.
-  # domains: auto | list of domain codes the element is estimated in.
-  cu: {canonical_unit: pct, unit: auto, ceiling: 34.6, diagnostic_cutoff: 0.5, domains: auto}
-  ni: {canonical_unit: pct, unit: auto, ceiling: 36.0, diagnostic_cutoff: 0.4, domains: auto}
-  co: {canonical_unit: pct, unit: auto, ceiling: 5.0,  diagnostic_cutoff: null, domains: auto}
-  fe: {canonical_unit: pct, unit: auto, ceiling: 72.4, diagnostic_cutoff: null, domains: auto}
-  s:  {canonical_unit: pct, unit: auto, ceiling: 53.5, diagnostic_cutoff: null, domains: auto}
-  zn: {canonical_unit: pct, unit: auto, ceiling: 67.1, diagnostic_cutoff: null, domains: auto}
-  pb: {canonical_unit: pct, unit: auto, ceiling: 86.6, diagnostic_cutoff: null, domains: auto}
-  au: {canonical_unit: gpt, unit: auto, ceiling: 500.0, diagnostic_cutoff: 0.5, domains: auto}
-  ag: {canonical_unit: gpt, unit: auto, ceiling: 5000.0, diagnostic_cutoff: null, domains: auto}
-  pd: {canonical_unit: gpt, unit: auto, ceiling: null, diagnostic_cutoff: null, domains: auto}
-  pt: {canonical_unit: gpt, unit: auto, ceiling: null, diagnostic_cutoff: null, domains: auto}
-  min_estimated_fraction: 0.01   # domains: auto -> an element counts as estimated in a domain if >= 1% of its blocks have a value
+  cu: {unit: pct, ceiling: 34.6, cutoff: 0.5}
+  au: {unit: gpt, ceiling: 500, cutoff: 0.5}
+  # Examples:
+  # ni: {column: NI_OK_FINAL, unit: pct, ceiling: 36, cutoff: 0.4}
+  # au: {column: AU_OPT, unit: opt, ceiling: 15, cutoff: 0.015}     (imperial)
 
+# Allowed density range. Blocks outside it, or with no density, are flagged.
+# metric: t/m3 (default 1.5 to 5.5); imperial: short tons/ft3 (default 0.045 to 0.175).
 density:
-  default_bounds: [1.5, 5.5]
-  domain_bounds: {}            # e.g. {"LIM": [1.0, 2.2], "MSU": [3.0, 7.5]}
-  check_waste: true            # also check waste domains (needed for waste tonnage)
+  range: [1.5, 5.5]
 
+# Your classification criteria, checked against the estimation details in the model (search
+# pass, number of samples and holes, slope of regression, kriging efficiency). Measured and
+# Indicated blocks that fail any limit are flagged.
+# REPLACE THESE EXAMPLE VALUES with the project's own criteria. To skip one, set it to null.
 support:
-  element: auto                # whose per-element estimation details to use if there are no model-wide ones; auto = first configured element that has them
-  thresholds_by_rank:          # PROJECT-SPECIFIC DEFAULTS: replace with the project's classification criteria. null = skip that condition
-    3: {nholes_min: 3, nsamples_min: 8, slope_reg_min: 0.80, kriging_eff_min: 0.50, max_pass: 1}
-    2: {nholes_min: 2, nsamples_min: 4, slope_reg_min: 0.50, kriging_eff_min: 0.30, max_pass: 2}
+  measured: {nholes_min: 3, nsamples_min: 8, slope_reg_min: 0.80, kriging_eff_min: 0.50, max_pass: 1}
+  indicated: {nholes_min: 2, nsamples_min: 4, slope_reg_min: 0.50, kriging_eff_min: 0.30, max_pass: 2}
 
-composites:
-  capped_columns: {}           # element -> capped grade column; found automatically from names like CU_CAP if empty
-  caps: {}                     # element -> {domain_code: cap_value}; applied if no capped column exists
-  length_column: auto
-  bias_warn_pct: 5.0           # model vs nearest-neighbour difference above this -> amber
-  bias_fail_pct: 10.0          # above this -> red
-
+# Rebuild the resource statement above a cutoff, to compare with the published one.
+# Example: resource_cutoff: {element: cu, value: 0.3}   (value in the element's unit)
+# null = skip.
 reporting:
-  resource_cutoff: null        # e.g. {element: cu, value: 0.3}; null = skip resource statement reproduction
-  include_waste_in_statement: false
-  gt_curve_steps: 25
+  resource_cutoff: null
 
-swath:
-  bin_multipliers: [2, 2, 1]   # swath slice width as multiples of the parent block size [DX, DY, DZ]
-  min_bin_tonnage_pct: 0.5     # slices holding < 0.5% of the domain tonnes are greyed out
-
-target_wireframe_volumes: {}   # {domain_code: volume_m3}; empty = skip
-
-tolerances:
-  coord_snap_m: 0.001
-  overfill_frac: 0.001
-  subblock_grade_std: 1.0e-4
-  above_comp_max_frac: 0.001
-
-report:
-  plotly_js: inline            # inline (works offline, default) | cdn
-  max_scatter_points: 15000
-  leapfrog_filter_template: "{flag} = 1"   # (to be verified) filter syntax in Leapfrog Geo
-
-export:
-  full_model_flags: false
+# If the tool picks the wrong column, or cannot decide, name the column here.
+# It tells you the exact line to add when this is needed. Example:
+#   column_overrides:
+#     domain: "EST_DOMAIN"
+#     sg: "DENSITY_FINAL"
+column_overrides: {}

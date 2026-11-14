@@ -12,7 +12,7 @@ from types import ModuleType
 
 from qaqc import config, export
 from qaqc.context import AuditContext, prepare
-from qaqc.modules import classification, composites, density, geometry, grades, support
+from qaqc.modules import classification, density, geometry, grades, support
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,6 @@ MODULES: dict[str, ModuleType] = {
     "grades": grades,
     "classification": classification,
     "support": support,
-    "composites": composites,
 }
 
 

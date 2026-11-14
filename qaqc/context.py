@@ -2,8 +2,8 @@
 
 Every check module exposes ``run(ctx)`` and writes only to its own key in ``ctx.bundle``, to
 ``ctx.flags``, ``ctx.figures``, ``ctx.tables`` and ``ctx.warnings``. Modules run in this
-order: geometry, density, grades, classification, support, composites (geometry first: it
-adds ``_VOL`` and ``_TONNES``).
+order: geometry, density, grades, classification, support (geometry first: it adds ``_VOL``
+and ``_TONNES``).
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from qaqc.config import ProjectConfig
 from qaqc.flags import FlagRegistry
 from qaqc.grid import GridInfo, setup_grid
 from qaqc.schema import ResolvedSchema
+from qaqc.units import measure_units
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +51,12 @@ class AuditContext:
     schema: ResolvedSchema
     grid: GridInfo
     bm: pd.DataFrame
-    comps: pd.DataFrame | None
     flags: FlagRegistry
-    comp_flags: FlagRegistry | None
     bundle: dict[str, Any] = field(default_factory=dict)
     figures: dict[str, Any] = field(default_factory=dict)
     warnings: list[AuditWarning] = field(default_factory=list)
     # Tables to write as CSV files by the export step: file stem -> DataFrame
-    # (e.g. "composite_domain_mismatch"). Modules add to it; only export writes files.
+    # Modules add to it; only export writes files.
     tables: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     def warn(self, severity: Severity, module: str, message: str) -> None:
@@ -132,12 +131,19 @@ def prepare(
         schema=resolved,
         grid=GridInfo.empty(),
         bm=bm,
-        comps=None,
         flags=FlagRegistry(len(bm)),
-        comp_flags=None,
     )
     ctx.bundle["timings"] = timings
     ctx.bundle["config"] = cfg.snapshot()
+    mu = measure_units(cfg)
+    ctx.bundle["units"] = {
+        "system": mu.system,
+        "length": mu.length,
+        "volume": mu.volume,
+        "tonnage": mu.tonnage,
+        "density": mu.density,
+        "note": "Result keys named 'tonnes' hold tonnage in the unit above.",
+    }
     ctx.bundle["schema"] = resolved.to_bundle()
     ctx.bundle["inputs"] = {
         "block_model": {

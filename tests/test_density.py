@@ -33,11 +33,11 @@ def test_domain_table(run_checks, kind):
         assert r["is_constant"] is False
 
 
-def test_domain_bounds_override(run_checks):
+def test_domain_ranges_override(run_checks):
     m = make_model("regular")
     base = run_checks(m).bundle["density"]["anomalies"]
     # OVB density is 2.0 +/- 0.1, so a 2.5 lower limit flags every OVB block with a value
-    ctx = run_checks(m, settings={"density": {"domain_bounds": {"OVB": [2.5, 3.0]}}})
+    ctx = run_checks(m, settings={"density": {"domain_ranges": {"OVB": [2.5, 3.0]}}})
     t = _used(m)
     ovb = t[t["domain"] == "OVB"]
     ovb_low_extra = int(ovb["sg"].between(1.5, 5.5).sum())  # were inside the default range

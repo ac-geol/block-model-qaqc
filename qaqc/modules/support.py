@@ -11,10 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from qaqc.config import CLASS_ORDER
 from qaqc.context import jsonable
 from qaqc.domains import class_ranks, domain_labels, weights
 from qaqc.modules.classification import El, aggregate, factorize
 from qaqc.stats import weighted_summary
+from qaqc.units import measure_units
 
 if TYPE_CHECKING:
     from qaqc.context import AuditContext
@@ -171,7 +173,13 @@ def run(ctx: AuditContext) -> None:
         values = {m: bm[c].to_numpy(dtype=np.float64) for m, c in columns.items()}
         labels = cfg.classification.rank_labels
         elements = [
-            El(el, bm[el].to_numpy(dtype=np.float64), es.unit, es.canonical_unit)
+            El(
+                el,
+                bm[el].to_numpy(dtype=np.float64),
+                es.unit,
+                es.canonical_unit,
+                measure_units(cfg).tonnes_per_tonnage_unit,
+            )
             for el, es in ctx.schema.elements.items()
         ]
 
@@ -196,7 +204,7 @@ def run(ctx: AuditContext) -> None:
 
         # --- 2. support statistics by class --------------------------------------------------
         stats_by_class = []
-        for r in range(int(ranks.max()) + 1):
+        for r in CLASS_ORDER:
             in_class = rows & (ranks == r)
             if not in_class.any():
                 continue

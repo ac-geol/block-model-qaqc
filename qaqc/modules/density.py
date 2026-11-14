@@ -49,9 +49,9 @@ def run(ctx: AuditContext) -> None:
         sg = bm["sg"].to_numpy(dtype=np.float64)
 
         # --- out-of-range flag -------------------------------------------------------------
-        lo = np.full(len(bm), cfg.density.default_bounds[0])
-        hi = np.full(len(bm), cfg.density.default_bounds[1])
-        for code, (b_lo, b_hi) in cfg.density.domain_bounds.items():
+        lo = np.full(len(bm), cfg.density_range[0])
+        hi = np.full(len(bm), cfg.density_range[1])
+        for code, (b_lo, b_hi) in cfg.density.domain_ranges.items():
             m = dom == code
             lo[m], hi[m] = b_lo, b_hi
         missing = checked & ~np.isfinite(sg)
@@ -65,6 +65,8 @@ def run(ctx: AuditContext) -> None:
             "high": int(high.sum()),
             "blocks_checked": int(checked.sum()),
             "waste_checked": bool(cfg.density.check_waste),
+            "default_range": list(cfg.density_range),
+            "domain_ranges": {k: list(v) for k, v in cfg.density.domain_ranges.items()},
         }
 
         # --- table by domain (volume-weighted) ---------------------------------------------

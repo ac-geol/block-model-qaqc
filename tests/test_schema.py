@@ -20,8 +20,8 @@ def _cfg(**extra):
         "project_name": "T",
         "paths": {"block_model_csv": "bm.csv"},
         "elements": {
-            "cu": {"canonical_unit": "pct", "ceiling": 34.6, "diagnostic_cutoff": 0.5},
-            "au": {"canonical_unit": "gpt", "ceiling": 500.0, "diagnostic_cutoff": 0.5},
+            "cu": {"ceiling": 34.6, "cutoff": 0.5},
+            "au": {"ceiling": 500.0, "cutoff": 0.5},
         },
     }
     data.update(extra)
@@ -135,9 +135,34 @@ def test_units_from_column_names():
 def test_unit_from_config_wins():
     s = _resolve(
         "X,Y,Z,DOMAIN,CU_PCT",
-        elements={"cu": {"canonical_unit": "pct", "unit": "ppm"}},
+        elements={"cu": {"unit": "ppm"}},
     )
     assert s.elements["cu"].unit == "ppm" and s.elements["cu"].unit_source == "config"
+    assert s.elements["cu"].threshold_unit == "ppm"
+
+
+@pytest.mark.parametrize("header", ["AU_OPT", "Au (oz/t)", "AU_OZT", "Au oz/ton"])
+def test_ounces_per_ton_from_column_names(header):
+    s = _resolve(f"X,Y,Z,DOMAIN,{header}")
+    assert s.elements["au"].unit == "opt"
+    assert s.elements["au"].threshold_unit == "gpt"  # metric project: settings in g/t
+
+
+def test_imperial_default_units():
+    s = _resolve("X,Y,Z,DOMAIN,AU,CU", units="imperial", elements={})
+    assert s.elements["au"].unit == "opt" and s.elements["au"].unit_source == "assumed"
+    assert s.elements["au"].metal_unit == "oz"
+    assert s.elements["cu"].unit == "pct" and s.elements["cu"].metal_unit == "short tons"
+
+
+def test_element_column_setting_picks_the_grade():
+    s = _resolve("X,Y,Z,DOMAIN,CU,CU_FINAL", elements={"cu": {"column": "cu"}})
+    assert s.elements["cu"].primary == "CU"
+    assert any(
+        e["standard"] == "cu.primary" and e["method"] == "override" for e in s.resolution_log
+    )
+    with pytest.raises(SchemaError, match="elements > cu > column"):
+        _resolve("X,Y,Z,DOMAIN,CU", elements={"cu": {"column": "CU_OK"}})
 
 
 # --- main estimate selection ---------------------------------------------------------------------

@@ -25,7 +25,7 @@ FLAG_TEXT = {
     "FLAG_NEG_{EL}": "Grade is below zero",
     "FLAG_CEILING_{EL}": "Grade is above the ceiling for this element",
     "FLAG_UNEST_{EL}": "Grade is missing in a domain where this element is estimated",
-    "FLAG_BLEED_{EL}": "Waste block has a grade above the diagnostic cutoff",
+    "FLAG_BLEED_{EL}": "Waste block has a grade above the cutoff",
 }
 
 
@@ -40,7 +40,7 @@ def _unit_check(ctx: AuditContext, es: ElementSchema, grade: np.ndarray) -> dict
         "column": es.primary,
         "unit": es.unit,
         "unit_source": es.unit_source,
-        "canonical_unit": es.canonical_unit,
+        "threshold_unit": es.threshold_unit,
         "likely_wrong": False,
     }
     if es.unit_source == "assumed":
@@ -48,7 +48,8 @@ def _unit_check(ctx: AuditContext, es: ElementSchema, grade: np.ndarray) -> dict
             "warning",
             MODULE,
             f"The unit of '{es.primary}' was not given and is not in the column name, so "
-            f"{es.unit} is assumed. Set elements.{el}.unit in the project file.",
+            f"{es.unit} is assumed. Add the unit to the settings file, e.g. "
+            f"elements: {el}: {{unit: {es.unit}}}.",
         )
     finite = grade[np.isfinite(grade)]
     if finite.size:
@@ -62,7 +63,8 @@ def _unit_check(ctx: AuditContext, es: ElementSchema, grade: np.ndarray) -> dict
                 "warning",
                 MODULE,
                 f"The unit of '{es.primary}' is likely wrong: it is read as {es.unit} but the "
-                f"99th percentile is {p99:.4g}. Set elements.{el}.unit in the project file.",
+                f"99th percentile is {p99:.4g}. Set the right unit in the settings file "
+                f"(elements: {el}: unit).",
             )
     return info
 
@@ -85,12 +87,12 @@ def run(ctx: AuditContext) -> None:
         for el, es in ctx.schema.elements.items():
             grade = bm[el].to_numpy(dtype=np.float64)
             ceiling = units.element_threshold(cfg, es, "ceiling")
-            cutoff = units.element_threshold(cfg, es, "diagnostic_cutoff")
+            cutoff = units.element_threshold(cfg, es, "cutoff")
             skipped: list[dict[str, str]] = []
-            for name, value in (("ceiling", ceiling), ("diagnostic_cutoff", cutoff)):
+            for name, value in (("ceiling", ceiling), ("cutoff", cutoff)):
                 if value is None:
                     why = (
-                        "element is not in the project file"
+                        "element is not listed in the settings file"
                         if not es.configured
                         else f"{name} is not set"
                     )
@@ -123,10 +125,15 @@ def run(ctx: AuditContext) -> None:
                 flag_counts[name] = int(mask.sum())
 
             # --- table by domain (weighted by tonnes, or volume without density) ----------
-            m_unit = units.metal_unit(es.canonical_unit)
-            to_canon = units.factor(es.unit, es.canonical_unit)
+            m_unit = es.metal_unit
             metal = (
-                units.contained_metal(tonnes, grade * to_canon, es.canonical_unit)
+                units.contained_metal(
+                    tonnes,
+                    grade,
+                    es.unit,
+                    es.canonical_unit,
+                    units.measure_units(cfg).tonnes_per_tonnage_unit,
+                )
                 if tonnes is not None
                 else None
             )
@@ -175,7 +182,7 @@ def run(ctx: AuditContext) -> None:
                 ],
                 "thresholds": {
                     "ceiling": ceiling,
-                    "diagnostic_cutoff": cutoff,
+                    "cutoff": cutoff,
                     "unit": es.unit,
                 },
                 "skipped_checks": skipped,

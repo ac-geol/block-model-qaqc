@@ -1,18 +1,16 @@
 """Figures for the report (spec 11).
 
 Every figure is drawn from the summaries the check modules put in ``ctx.bundle``. The only
-exceptions are the density-versus-grade scatter and the grade CDFs, which read block (and
-composite) rows. The scatter is cut down to ``report.max_scatter_points`` points (stratified by
-domain, fixed random seed) and every CDF is reduced to about 200 points.
+exceptions are the density-versus-grade scatter and the grade CDFs, which read block rows. The
+scatter is cut down to ``report.max_scatter_points`` points (stratified by domain, fixed random
+seed) and every CDF is reduced to about 200 points.
 
 :func:`build_figures` returns plotly figures keyed by name:
 
 * ``density_box``, ``density_vs_grade``: density by domain; density against each grade;
-* ``classification_bar``: tonnes by domain, split by class;
+* ``classification_bar``: tonnage by domain, split by class;
 * ``support_box``: estimation details by class;
-* ``cdf_<el>``: grade distribution by domain for one element;
-* ``gt_<domain>|<el>``: grade-tonnage curves, block model against nearest-neighbour;
-* ``swath_<domain>|<el>``: three stacked swath plots (model X, Y and Z).
+* ``cdf_<el>``: grade distribution by domain for one element.
 
 A figure that cannot be drawn (module not run, nothing to show) is simply left out.
 """
@@ -28,8 +26,10 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from qaqc.config import CLASS_ORDER
 from qaqc.domains import applicable_domains, domain_labels, weights
 from qaqc.stats import clean_pairs
+from qaqc.units import UNIT_LABELS, measure_units
 
 if TYPE_CHECKING:
     from qaqc.context import AuditContext
@@ -46,14 +46,8 @@ PALETTE = (
     "#8C6D31",
     "#7F7F7F",
 )
-CLASS_COLOURS = {3: "#0072B2", 2: "#56B4E9", 1: "#E69F00", 0: "#9A9A9A"}
-BM_COLOUR = "#0072B2"
-COMP_COLOUR = "#D55E00"
-NN_COLOUR = "#009E73"
-GREY = "rgba(110,110,110,0.35)"
-GREY_LIGHT = "rgba(190,190,190,0.25)"
+CLASS_COLOURS = {3: "#0072B2", 2: "#56B4E9", 1: "#E69F00", 4: "#CC79A7", 0: "#9A9A9A"}
 CDF_POINTS = 200
-AXIS_NAMES = {"x": "Model X (m)", "y": "Model Y (m)", "z": "Model Z (m)"}
 
 # estimation detail -> axis title, in the order they are drawn (pass number is a table, not a box)
 SUPPORT_DETAILS = {
@@ -100,7 +94,7 @@ def unit_label(ctx: AuditContext, element: str) -> str:
     es = ctx.schema.elements.get(element)
     if es is None:
         return ""
-    return {"gpt": "g/t", "pct": "%"}.get(es.unit, es.unit)
+    return UNIT_LABELS.get(es.unit, es.unit)
 
 
 def domain_colours(ctx: AuditContext) -> dict[str, str]:
@@ -190,7 +184,7 @@ def density_box(ctx: AuditContext) -> go.Figure | None:
         )
     if not fig.data:
         return None
-    fig.update_yaxes(title="Density (SG)")
+    fig.update_yaxes(title=f"Density ({measure_units(ctx.cfg).density})")
     fig.update_xaxes(title="Domain")
     fig.update_layout(boxmode="overlay")
     return _base_layout(
@@ -247,7 +241,7 @@ def density_vs_grade(ctx: AuditContext) -> go.Figure | None:
                     showlegend=str(code) not in seen,
                     marker={"size": 4, "opacity": 0.6, "color": colours.get(str(code))},
                     hovertemplate=(
-                        f"{code}<br>{el.upper()}: %{{x:.4g}}<br>SG: %{{y:.3f}}<extra></extra>"
+                        f"{code}<br>{el.upper()}: %{{x:.4g}}<br>Density: %{{y:.4g}}<extra></extra>"
                     ),
                 ),
                 row=r + 1,
@@ -258,7 +252,11 @@ def density_vs_grade(ctx: AuditContext) -> go.Figure | None:
         fig.update_xaxes(
             title_text=f"{el.upper()} grade, log scale", type="log", row=r + 1, col=c + 1
         )
-        fig.update_yaxes(title_text="Density (SG)" if c == 0 else None, row=r + 1, col=c + 1)
+        fig.update_yaxes(
+            title_text=f"Density ({measure_units(ctx.cfg).density})" if c == 0 else None,
+            row=r + 1,
+            col=c + 1,
+        )
     if not drawn:
         return None
     title = "Density against grade (grade on a log scale)"
@@ -284,9 +282,10 @@ def classification_bar(ctx: AuditContext) -> go.Figure | None:
     if not inv:
         return None
     use_tonnes = all(r.get("tonnes") is not None for r in inv)
-    key = "tonnes" if use_tonnes else "volume_m3"
+    key = "tonnes" if use_tonnes else "volume"
     domains = sorted({str(r["domain"]) for r in inv})
-    ranks = sorted({int(r["rank"]) for r in inv}, reverse=True)
+    present = {int(r["rank"]) for r in inv}
+    ranks = [r for r in CLASS_ORDER if r in present]
     fig = go.Figure()
     for rank in ranks:
         label = next(str(r["class"]) for r in inv if int(r["rank"]) == rank)
@@ -303,7 +302,10 @@ def classification_bar(ctx: AuditContext) -> go.Figure | None:
         )
     fig.update_layout(barmode="stack")
     fig.update_yaxes(autorange="reversed", title="Domain", type="category")
-    fig.update_xaxes(title="Tonnes" if use_tonnes else "Volume (m³)", tickformat=",.3s")
+    mu = measure_units(ctx.cfg)
+    fig.update_xaxes(
+        title=mu.tonnage_word if use_tonnes else f"Volume ({mu.volume})", tickformat=",.3s"
+    )
     return _base_layout(fig, "Classification by domain", height=max(300, 60 * len(domains) + 160))
 
 
@@ -367,7 +369,7 @@ def support_box(ctx: AuditContext) -> go.Figure | None:
 
 
 def grade_cdfs(ctx: AuditContext) -> dict[str, go.Figure]:
-    """One CDF figure per element (``cdf_<el>``), by domain, with composites if loaded."""
+    """One CDF figure per element (``cdf_<el>``), by domain."""
     out: dict[str, go.Figure] = {}
     if "_VOL" not in ctx.bm.columns or not ctx.bundle.get("grades", {}).get("elements"):
         return out
@@ -376,13 +378,6 @@ def grade_cdfs(ctx: AuditContext) -> dict[str, go.Figure]:
     dom = domain_labels(bm)
     analysed = ctx.analysis_mask
     colours = domain_colours(ctx)
-    comps = ctx.comps
-    cdom = domain_labels(comps) if comps is not None else None
-    clen = (
-        comps["length"].to_numpy(dtype=np.float64)
-        if comps is not None and "length" in comps.columns
-        else None
-    )
     for el in ctx.bundle["grades"]["elements"]:
         if el not in bm.columns:
             continue
@@ -400,183 +395,19 @@ def grade_cdfs(ctx: AuditContext) -> dict[str, go.Figure]:
                     x=pts[0],
                     y=pts[1],
                     mode="lines",
-                    name=f"{d} (model)",
+                    name=str(d),
                     legendgroup=str(d),
                     line={"color": colours.get(str(d)), "width": 2},
                 )
             )
-            if comps is not None and f"_USED_{el}" in comps.columns:
-                m = cdom == d
-                cw = clen[m] if clen is not None else None
-                cpts = _cdf_points(comps[f"_USED_{el}"].to_numpy(dtype=np.float64)[m], cw)
-                if cpts is not None:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=cpts[0],
-                            y=cpts[1],
-                            mode="lines",
-                            name=f"{d} (composites)",
-                            legendgroup=str(d),
-                            line={"color": colours.get(str(d)), "width": 2, "dash": "dash"},
-                        )
-                    )
         if not fig.data:
             continue
         fig.update_xaxes(title=f"{el.upper()} grade ({unit_label(ctx, el)}), log scale", type="log")
         fig.update_yaxes(title="Share of material below this grade", tickformat=".0%", range=[0, 1])
-        weight_text = "tonnes" if basis == "tonnes" else "volume"
-        extra = "; composites: length-weighted, capped" if comps is not None else ""
+        weight_text = "tonnage" if basis == "tonnes" else "volume"
         out[f"cdf_{el}"] = _base_layout(
-            fig,
-            f"{el.upper()} cumulative distribution (model: weighted by {weight_text}{extra})",
+            fig, f"{el.upper()} cumulative distribution (weighted by {weight_text})"
         )
-    return out
-
-
-# ---------------------------------------------------------------------------------------------
-# composites: grade-tonnage curves and swaths
-# ---------------------------------------------------------------------------------------------
-
-
-def gt_figures(ctx: AuditContext) -> dict[str, go.Figure]:
-    """Grade-tonnage curves, model against nearest-neighbour: ``gt_<domain>|<el>``."""
-    out: dict[str, go.Figure] = {}
-    curves = (ctx.bundle.get("composites") or {}).get("gt_curves") or {}
-    for key, c in curves.items():
-        domain, _, el = key.rpartition("|")
-        cut = c.get("cutoffs") or []
-        if not cut:
-            continue
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        for name, field, colour, dash, secondary in (
-            ("Model tonnes", "bm_tonnes", BM_COLOUR, "solid", False),
-            ("Nearest-neighbour tonnes", "nn_tonnes", NN_COLOUR, "solid", False),
-            ("Model grade", "bm_grade", BM_COLOUR, "dot", True),
-            ("Nearest-neighbour grade", "nn_grade", NN_COLOUR, "dot", True),
-        ):
-            fig.add_trace(
-                go.Scatter(
-                    x=cut,
-                    y=c.get(field),
-                    mode="lines",
-                    name=name,
-                    line={"color": colour, "dash": dash, "width": 2},
-                ),
-                secondary_y=secondary,
-            )
-        unit = unit_label(ctx, el)
-        fig.update_xaxes(title=f"{el.upper()} cutoff grade ({unit})")
-        fig.update_yaxes(title_text="Tonnes above cutoff", tickformat=",.3s", secondary_y=False)
-        fig.update_yaxes(
-            title_text=f"Mean {el.upper()} grade above cutoff ({unit})",
-            showgrid=False,
-            secondary_y=True,
-        )
-        out[f"gt_{key}"] = _base_layout(
-            fig, f"{domain}: {el.upper()} grade-tonnage (solid: tonnes, dotted: grade)"
-        )
-    return out
-
-
-def swath_figures(ctx: AuditContext) -> dict[str, go.Figure]:
-    """Swath plots, three stacked rows (model X, Y, Z): ``swath_<domain>|<el>``."""
-    out: dict[str, go.Figure] = {}
-    swaths = (ctx.bundle.get("composites") or {}).get("swaths") or {}
-    grouped: dict[str, dict[str, list[dict[str, Any]]]] = {}
-    for key, bins in swaths.items():
-        name, _, axis = key.rpartition("|")  # "<domain>|<el>", "<axis>"
-        grouped.setdefault(name, {})[axis] = bins
-    for name, by_axis in grouped.items():
-        _, _, el = name.rpartition("|")
-        unit = unit_label(ctx, el)
-        fig = make_subplots(
-            rows=3,
-            cols=1,
-            specs=[[{"secondary_y": True}]] * 3,
-            vertical_spacing=0.09,
-            subplot_titles=[AXIS_NAMES[a] for a in ("x", "y", "z")],
-        )
-        for row, axis in enumerate(("x", "y", "z"), start=1):
-            bins = by_axis.get(axis) or []
-            if not bins:
-                continue
-            first = row == 1
-            centre = [b["centre"] for b in bins]
-            low = [bool(b.get("low_support")) for b in bins]
-            fig.add_trace(
-                go.Bar(
-                    x=centre,
-                    y=[b["tonnes"] for b in bins],
-                    width=[b["bin_to"] - b["bin_from"] for b in bins],
-                    marker_color=[GREY_LIGHT if x else GREY for x in low],
-                    name="Tonnes (light grey: very few tonnes)",
-                    legendgroup="tonnes",
-                    showlegend=first,
-                    hovertemplate="Tonnes: %{y:,.0f}<extra></extra>",
-                ),
-                row=row,
-                col=1,
-                secondary_y=False,
-            )
-            for label, field, colour, dash in (
-                ("Model grade", "bm_grade", BM_COLOUR, "solid"),
-                ("Composite mean", "comp_mean", COMP_COLOUR, "dash"),
-                ("Nearest neighbour", "nn_grade", NN_COLOUR, "dot"),
-            ):
-                custom = [b["comp_count"] for b in bins] if field == "comp_mean" else None
-                hover = f"{label}: %{{y:.4g}}"
-                if custom:
-                    hover += "<br>Composites: %{customdata}"
-                fig.add_trace(
-                    go.Scatter(
-                        x=centre,
-                        y=[b.get(field) for b in bins],
-                        mode="lines",
-                        name=label,
-                        legendgroup=field,
-                        showlegend=first,
-                        line={"color": colour, "dash": dash, "width": 2},
-                        customdata=custom,
-                        hovertemplate=hover + "<extra></extra>",
-                    ),
-                    row=row,
-                    col=1,
-                    secondary_y=True,
-                )
-            if any(low):
-                fig.add_trace(
-                    go.Scatter(
-                        x=[b["centre"] for b in bins if b.get("low_support")],
-                        y=[b.get("bm_grade") for b in bins if b.get("low_support")],
-                        mode="markers",
-                        name="Model grade (low-tonnage bin)",
-                        legendgroup="low",
-                        showlegend=first,
-                        marker={
-                            "color": "rgba(0,0,0,0)",
-                            "line": {"color": "#777", "width": 1.5},
-                            "size": 7,
-                        },
-                        hoverinfo="skip",
-                    ),
-                    row=row,
-                    col=1,
-                    secondary_y=True,
-                )
-            fig.update_yaxes(
-                title_text="Tonnes", tickformat=".2s", secondary_y=False, row=row, col=1
-            )
-            fig.update_yaxes(
-                title_text=f"{el.upper()} ({unit})",
-                showgrid=False,
-                secondary_y=True,
-                row=row,
-                col=1,
-            )
-        if not fig.data:
-            continue
-        domain = name.rpartition("|")[0]
-        out[f"swath_{name}"] = _base_layout(fig, f"{domain}: {el.upper()} swaths", height=900)
     return out
 
 
@@ -596,8 +427,6 @@ def build_figures(ctx: AuditContext) -> dict[str, go.Figure]:
         ("classification_bar", classification_bar),
         ("support_box", support_box),
         ("grade CDFs", grade_cdfs),
-        ("grade-tonnage curves", gt_figures),
-        ("swaths", swath_figures),
     ]
     for label, builder in builders:
         try:

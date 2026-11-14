@@ -50,8 +50,6 @@ def test_planted_counts(kind, rotation):
     assert m.expected["low_support_missing_by_condition"]["nsamples"] == 2
     assert m.expected["sentinel_replacements"] == {"CU_PCT": 7, "SG": 3, "NS": 2}
     assert m.expected["coerced_values"] == {"CU_PCT": 1, "SG": 1}
-    assert m.expected["composites"]["COMP_OUTSIDE_MODEL"] == P["comp_outside"]
-    assert m.expected["composites"]["COMP_DOMAIN_MISMATCH"] == P["comp_mismatch"]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -61,8 +59,6 @@ def test_clean_model_has_no_problems(kind):
     assert m.expected["flags"]["FLAG_OFF_GRID"] == 0
     for name, count in m.expected["flags"].items():
         assert count == 0, name
-    assert m.expected["composites"]["COMP_OUTSIDE_MODEL"] == 0
-    assert m.expected["composites"]["COMP_DOMAIN_MISMATCH"] == 0
 
 
 @pytest.mark.parametrize("kind", KINDS)

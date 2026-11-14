@@ -26,7 +26,9 @@ from plotly import offline
 
 import qaqc
 from qaqc import figures
+from qaqc.config import CLASS_ORDER
 from qaqc.export import ExportError, flag_catalog
+from qaqc.units import UNIT_LABELS, measure_units
 
 if TYPE_CHECKING:
     from qaqc.context import AuditContext
@@ -44,7 +46,6 @@ TABS: dict[str, str] = {
     "classification": "Classification",
     "grades": "Grade distributions",
     "support": "Estimation and support",
-    "composites": "Composite validation and swaths",
     "flags": "Flag register",
 }
 
@@ -52,6 +53,16 @@ Block = dict[str, Any]
 
 
 # --------------------------------------------------------------------------- formatting
+
+
+def unit_text(unit: str | None) -> str:
+    """A grade unit as people write it (``gpt`` -> ``g/t``, ``opt`` -> ``oz/ton``)."""
+    return UNIT_LABELS.get(unit or "", unit or "")
+
+
+def _mu(ctx: AuditContext):
+    """Length, volume, tonnage and density labels for the project's unit system."""
+    return measure_units(ctx.cfg)
 
 
 def _ok(x: Any) -> bool:
@@ -192,8 +203,6 @@ def _skip_reason(ctx: AuditContext, key: str) -> str | None:
     res = ctx.bundle.get(key)
     if not res:
         return "Not run: this check was not part of this run."
-    if key == "composites" and not res.get("loaded"):
-        return f"Skipped because {res.get('skipped', 'no composites were loaded')}."
     if res.get("skipped"):
         return f"Skipped because {res['skipped']}."
     return None
@@ -205,39 +214,12 @@ def _skip_reason(ctx: AuditContext, key: str) -> str | None:
 def _status_badges(ctx: AuditContext) -> list[dict[str, str]]:
     """Headline red / amber / green items for the top of the report."""
     out: list[dict[str, str]] = []
-    comp = ctx.bundle.get("composites") or {}
-    uncapped = comp.get("uncapped_elements") or []
-    if uncapped:
-        out.append(
-            {
-                "cls": "bad",
-                "text": "Composites are uncapped ("
-                + ", ".join(e.upper() for e in uncapped)
-                + "): the bias results may be misleading.",
-            }
-        )
-    bias = [b for b in comp.get("bias_table") or [] if b.get("domain") != "(all mineralized)"]
-    for status, cls, word in (
-        ("fail", "bad", "differs a lot from"),
-        ("warn", "warn", "differs from"),
-    ):
-        rows = [b for b in bias if b.get("status") == status]
-        if rows:
-            names = ", ".join(f"{b['element'].upper()} in {b['domain']}" for b in rows[:6])
-            more = f" and {len(rows) - 6} more" if len(rows) > 6 else ""
-            out.append(
-                {
-                    "cls": cls,
-                    "text": f"Model grade {word} the nearest-neighbour benchmark: {names}{more}.",
-                }
-            )
     for key, label in (
         ("geometry", "Geometry"),
         ("density", "Density"),
         ("grades", "Grades"),
         ("classification", "Classification"),
         ("support", "Estimation support"),
-        ("composites", "Composites"),
     ):
         reason = _skip_reason(ctx, key)
         if reason:
@@ -287,8 +269,8 @@ def _overview(ctx: AuditContext, page: _Page) -> list[Block]:
     items = [
         {"label": "Blocks read", "value": fint(inputs.get("rows", n_rows))},
         {"label": "Blocks checked", "value": fint(ingest.get("rows_analysed", n_rows))},
-        {"label": "Volume (m³)", "value": fsig(geo.get("total_volume_m3"), 4)},
-        {"label": "Tonnes", "value": fsig(geo.get("total_tonnes"), 4)},
+        {"label": f"Volume ({_mu(ctx).volume})", "value": fsig(geo.get("total_volume"), 4)},
+        {"label": _mu(ctx).tonnage_word, "value": fsig(geo.get("total_tonnes"), 4)},
         {
             "label": "Blocks flagged",
             "value": f"{fint(flagged)} ({fpct(100.0 * flagged / n_rows if n_rows else 0, 2)})",
@@ -316,16 +298,6 @@ def _overview(ctx: AuditContext, page: _Page) -> list[Block]:
             inputs.get("sha256") or DASH,
         ]
     ]
-    comp_in = (b.get("composites") or {}).get("input") or {}
-    if comp_in.get("path"):
-        in_rows.append(
-            [
-                "Composites",
-                comp_in.get("path"),
-                fint(comp_in.get("rows")),
-                comp_in.get("sha256") or DASH,
-            ]
-        )
     blocks += [
         h3("Input files"),
         note("The SHA-256 fingerprint identifies the exact file that was checked."),
@@ -355,7 +327,8 @@ def _overview(ctx: AuditContext, page: _Page) -> list[Block]:
         h3("How the file's columns were matched"),
         note(
             "Check that each grade, domain and coordinate column is the one you expect. "
-            "If not, set it under column_overrides in the project file."
+            "If not, name the right column in the settings file (column_overrides, or column: "
+            "under the element)."
         ),
         table(
             ["What it is", "Column in file", "How it was found"],
@@ -471,13 +444,16 @@ def _geometry(ctx: AuditContext, page: _Page) -> list[Block]:
                     ("Model type", g.get("model_type", DASH)),
                     ("Blocks checked", fint(g.get("blocks_analysed"))),
                     ("Parent cells", fint(g.get("parent_cells"))),
-                    ("Total volume (m³)", fnum(g.get("total_volume_m3"), 0)),
-                    ("Total tonnes", fnum(g.get("total_tonnes"), 0)),
-                    ("Blocks without tonnes", fint(g.get("blocks_without_tonnes"))),
+                    (f"Total volume ({_mu(ctx).volume})", fnum(g.get("total_volume"), 0)),
+                    (f"Total {_mu(ctx).tonnage_word.lower()}", fnum(g.get("total_tonnes"), 0)),
+                    ("Blocks without tonnage", fint(g.get("blocks_without_tonnes"))),
                     ("Blocks without coordinates", fint(g.get("blocks_without_coordinates"))),
                 ]
                 + [
-                    (f"Extent along {a.upper()} (m)", f"{fnum(v[0], 1)} to {fnum(v[1], 1)}")
+                    (
+                        f"Extent along {a.upper()} ({_mu(ctx).length})",
+                        f"{fnum(v[0], 1)} to {fnum(v[1], 1)}",
+                    )
                     for a, v in box.items()
                     if v
                 ]
@@ -563,9 +539,9 @@ def _geometry(ctx: AuditContext, page: _Page) -> list[Block]:
         wf = [
             [
                 r["domain"],
-                fnum(r["model_volume_m3"], 0),
-                fnum(r["wireframe_volume_m3"], 0),
-                fnum(r["difference_m3"], 0),
+                fnum(r["model_volume"], 0),
+                fnum(r["wireframe_volume"], 0),
+                fnum(r["difference_volume"], 0),
                 fpct(r["difference_pct"]),
             ]
             for r in g.get("wireframe_volumes") or []
@@ -575,9 +551,9 @@ def _geometry(ctx: AuditContext, page: _Page) -> list[Block]:
             table(
                 [
                     "Domain",
-                    "Model volume (m³)",
-                    "Wireframe volume (m³)",
-                    "Difference (m³)",
+                    f"Model volume ({_mu(ctx).volume})",
+                    f"Wireframe volume ({_mu(ctx).volume})",
+                    f"Difference ({_mu(ctx).volume})",
                     "Difference",
                 ],
                 wf,
@@ -599,6 +575,18 @@ def _geometry(ctx: AuditContext, page: _Page) -> list[Block]:
         kv(
             [
                 ("Blocks checked", fint(a.get("blocks_checked"))),
+                (
+                    f"Allowed range ({_mu(ctx).density})",
+                    " to ".join(fsig(v) for v in a.get("default_range") or []) or DASH,
+                ),
+                (
+                    "Ranges for single domains",
+                    "; ".join(
+                        f"{k}: {fsig(v[0])} to {fsig(v[1])}"
+                        for k, v in (a.get("domain_ranges") or {}).items()
+                    )
+                    or "none",
+                ),
                 ("Density missing", fint(a.get("missing"))),
                 ("Density too low", fint(a.get("low"))),
                 ("Density too high", fint(a.get("high"))),
@@ -672,7 +660,7 @@ def _grade_columns(units: dict[str, Any]) -> list[str]:
     cols: list[str] = []
     for el, u in units.items():
         cols += [
-            f"{el.upper()} grade ({u.get('grade', '')})",
+            f"{el.upper()} grade ({unit_text(u.get('grade'))})",
             f"{el.upper()} metal ({u.get('metal', '')})",
         ]
     return cols
@@ -692,15 +680,16 @@ def _classification(ctx: AuditContext, page: _Page) -> list[Block]:
     cl = ctx.bundle["classification"]
     units = cl.get("units") or {}
     labels = ctx.cfg.classification.rank_labels
-    by_rank: dict[int, list[str]] = {}
+    by_rank: dict[int, list[str]] = {r: [] for r in CLASS_ORDER}
     for code, rank in ctx.cfg.classification.rank_map.items():
         by_rank.setdefault(int(rank), []).append(str(code))
     rank_rows = [
-        [labels.get(r, str(r)), ", ".join(sorted(codes))]
-        for r, codes in sorted(by_rank.items(), reverse=True)
+        [labels.get(r, str(r)), ", ".join(sorted(by_rank[r])) or DASH]
+        for r in CLASS_ORDER
+        if r in labels
     ]
     basis = (
-        "tonnes" if cl.get("weight_basis") == "tonnes" else "volume (there is no density column)"
+        "tonnage" if cl.get("weight_basis") == "tonnes" else "volume (there is no density column)"
     )
     inv = cl.get("inventory") or []
     inv_rows = [
@@ -709,7 +698,7 @@ def _classification(ctx: AuditContext, page: _Page) -> list[Block]:
             r["class"],
             fint(r["blocks"]),
             fnum(r.get("tonnes"), 0),
-            fnum(r["volume_m3"], 0),
+            fnum(r["volume"], 0),
             fpct(r.get("pct_of_domain")),
         ]
         + _grade_cells(r, units)
@@ -723,13 +712,13 @@ def _classification(ctx: AuditContext, page: _Page) -> list[Block]:
     out: list[Block | None] = [
         h3("Class codes"),
         note(
-            "How the codes in the file were turned into Measured, Indicated, Inferred "
-            "or Unclassified."
+            "How the codes in the file were turned into Measured, Indicated, Inferred, "
+            "Exploration Target or Unclassified."
         ),
-        table(["Class", "Codes in the project file"], rank_rows),
+        table(["Class", "Codes in the settings file"], rank_rows),
         h4("Codes that are not in the list") if cl.get("unmapped_codes") else None,
         table(
-            ["Code", "Blocks", "Tonnes"],
+            ["Code", "Blocks", _mu(ctx).tonnage_word],
             [
                 [u["code"], fint(u["blocks"]), fnum(u.get("tonnes"), 0)]
                 for u in cl.get("unmapped_codes") or []
@@ -738,7 +727,14 @@ def _classification(ctx: AuditContext, page: _Page) -> list[Block]:
         h3("Inventory by domain and class"),
         note(f"Averages are weighted by {basis}. Metal is in {metal_txt}."),
         table(
-            ["Domain", "Class", "Blocks", "Tonnes", "Volume (m³)", "Share of domain"]
+            [
+                "Domain",
+                "Class",
+                "Blocks",
+                _mu(ctx).tonnage_word,
+                f"Volume ({_mu(ctx).volume})",
+                "Share of domain",
+            ]
             + _grade_columns(units),
             inv_rows,
         ),
@@ -747,7 +743,7 @@ def _classification(ctx: AuditContext, page: _Page) -> list[Block]:
         kv(
             [
                 ("Blocks", c(fint(un.get("blocks", 0)), "ok" if not un.get("blocks") else "warn")),
-                ("Tonnes", fnum(un.get("tonnes"), 0)),
+                (_mu(ctx).tonnage_word, fnum(un.get("tonnes"), 0)),
                 ("Grade limits used (at or above)", cut_txt or DASH),
                 (
                     "Elements with no limit set (not checked)",
@@ -765,18 +761,20 @@ def _classification(ctx: AuditContext, page: _Page) -> list[Block]:
             el = st["element"].upper()
             out.append(
                 note(
-                    f"Everything at or above {fsig(st['cutoff_canonical'])} "
-                    f"{st['canonical_unit']} {el} (in the file's unit: "
-                    f"{fsig(st['cutoff_in_column_unit'])} {st['column_unit']}); "
-                    + ("waste included." if st.get("waste_included") else "waste left out.")
+                    f"Everything at or above {fsig(st['cutoff_value'])} "
+                    f"{unit_text(st['cutoff_unit'])} {el} (in the file's unit: "
+                    f"{fsig(st['cutoff_in_column_unit'])} {unit_text(st['column_unit'])}); "
+                    + ("waste included. " if st.get("waste_included") else "waste left out. ")
+                    + "The total is Measured + Indicated + Inferred; Exploration Target and "
+                    "Unclassified are shown by class but not added to it."
                 )
             )
             rows = list(st.get("by_class") or [])
             if st.get("total"):
-                rows.append({**st["total"], "class": "Total"})
+                rows.append({**st["total"], "class": "Total (Measured + Indicated + Inferred)"})
             out.append(
                 table(
-                    ["Class", "Blocks", "Tonnes"] + _grade_columns(units),
+                    ["Class", "Blocks", _mu(ctx).tonnage_word] + _grade_columns(units),
                     [
                         [r["class"], fint(r["blocks"]), fnum(r.get("tonnes"), 0)]
                         + _grade_cells(r, units)
@@ -798,14 +796,14 @@ def _grades(ctx: AuditContext, page: _Page) -> list[Block]:
     elements = g.get("elements") or {}
     if not elements:
         return [skipped("No grade columns were found in the block model.")]
-    basis = "tonnes" if g.get("weights") == "tonnes" else "volume (there is no density column)"
+    basis = "tonnage" if g.get("weights") == "tonnes" else "volume (there is no density column)"
     out: list[Block | None] = [
         note(f"Averages and percentiles are weighted by {basis}. Air blocks are left out.")
     ]
     for el, e in elements.items():
         u = e.get("units") or {}
         th = e.get("thresholds") or {}
-        unit = th.get("unit", u.get("unit", ""))
+        unit = unit_text(th.get("unit", u.get("unit", "")))
         rows = []
         for r in e.get("by_domain") or []:
             status_cls = {"estimated": "ok", "waste": "info"}.get(r["status"], "warn")
@@ -840,9 +838,9 @@ def _grades(ctx: AuditContext, page: _Page) -> list[Block]:
             ],
             ["Grade missing where the element is estimated", _count_cell(counts.get("UNEST", 0))],
             [
-                f"Waste grade above {fsig(th.get('diagnostic_cutoff'))} {unit}"
-                if th.get("diagnostic_cutoff") is not None
-                else "Waste grade above the diagnostic cutoff (none set)",
+                f"Waste grade above {fsig(th.get('cutoff'))} {unit}"
+                if th.get("cutoff") is not None
+                else "Waste grade above the cutoff (none set)",
                 _count_cell(counts.get("BLEED", 0)),
             ],
         ]
@@ -871,7 +869,7 @@ def _grades(ctx: AuditContext, page: _Page) -> list[Block]:
                     "Status",
                     "Blocks",
                     "Not estimated",
-                    "Tonnes",
+                    _mu(ctx).tonnage_word,
                     "Mean (weighted)",
                     "Mean (simple)",
                     "SD",
@@ -981,7 +979,16 @@ def _support(ctx: AuditContext, page: _Page) -> list[Block]:
             ]
             out += [
                 h4(title),
-                table([first.capitalize(), "Pass", "Blocks", "Tonnes", "Share of row total"], rows),
+                table(
+                    [
+                        first.capitalize(),
+                        "Pass",
+                        "Blocks",
+                        _mu(ctx).tonnage_word,
+                        "Share of row total",
+                    ],
+                    rows,
+                ),
             ]
     low = s.get("low_support") or {}
     thr_rows = []
@@ -1008,7 +1015,7 @@ def _support(ctx: AuditContext, page: _Page) -> list[Block]:
                     "Blocks failing at least one condition",
                     c(fint(low.get("blocks", 0)), "ok" if not low.get("blocks") else "warn"),
                 ),
-                ("Tonnes", fnum(low.get("tonnes"), 0)),
+                (_mu(ctx).tonnage_word, fnum(low.get("tonnes"), 0)),
             ]
         ),
         table(["Class", "Condition", "Limit", "Blocks failing", "Blocks with no value"], thr_rows),
@@ -1023,180 +1030,6 @@ def _support(ctx: AuditContext, page: _Page) -> list[Block]:
         )
     if s.get("kriging_variance_note"):
         out.append(note(s["kriging_variance_note"]))
-    return _blocks(out)
-
-
-# --------------------------------------------------------------------------- composites
-
-
-def _composites(ctx: AuditContext, page: _Page) -> list[Block]:
-    reason = _skip_reason(ctx, "composites")
-    if reason:
-        return [skipped(reason)]
-    cp = ctx.bundle["composites"]
-    cap_rows = []
-    for el, info in (cp.get("capping") or {}).items():
-        method = info.get("method")
-        text, cls = {
-            "capped_column": ("Capped column found", "ok"),
-            "config_caps": ("Caps from the project file", "ok"),
-            "uncapped": ("UNCAPPED", "bad"),
-        }.get(method, (str(method), "info"))
-        cap_rows.append(
-            [
-                el.upper(),
-                c(text, cls),
-                info.get("raw_column") or DASH,
-                info.get("capped_column") or DASH,
-                fint(info.get("n_capped")),
-                fsig(info.get("max_used")),
-            ]
-        )
-    out: list[Block | None] = [
-        h3("Capping"),
-        note(
-            "Bias checks should use capped composites. If the composites are not capped, "
-            "high grades make the benchmark look too high."
-        ),
-        kv(
-            [
-                ("Composites read", fint(cp.get("rows"))),
-                ("Weighted by", "length" if cp.get("length_source") else "equal weight"),
-            ]
-        ),
-        table(
-            [
-                "Element",
-                "Capping",
-                "Raw grade column",
-                "Capped grade column",
-                "Composites capped",
-                "Highest grade used",
-            ],
-            cap_rows,
-        ),
-    ]
-    if cp.get("elements_without_composites"):
-        out.append(
-            note(
-                "No composite grades for: "
-                + ", ".join(e.upper() for e in cp["elements_without_composites"])
-                + "."
-            )
-        )
-
-    matrix = cp.get("domain_matrix") or []
-    comp_doms = sorted({str(m["composite_domain"]) for m in matrix})
-    block_doms = sorted({str(m["block_domain"]) for m in matrix})
-    lookup = {(str(m["composite_domain"]), str(m["block_domain"])): m["count"] for m in matrix}
-    mat_rows = []
-    for cd in comp_doms:
-        row: list[Any] = [cd]
-        for bd in block_doms:
-            n = lookup.get((cd, bd), 0)
-            row.append(c(fint(n), "ok") if cd == bd and n else (c(fint(n), "warn") if n else "0"))
-        mat_rows.append(row)
-    out += [
-        h3("Do composite domains agree with the model?"),
-        note(
-            "Each row is the composite's own domain. Each column is the domain of the block "
-            "it sits in. Counts off the diagonal are mismatches."
-        ),
-        kv(
-            [
-                (
-                    "Composites outside the model",
-                    c(
-                        fint(cp.get("outside_count", 0)),
-                        "ok" if not cp.get("outside_count") else "warn",
-                    ),
-                ),
-                (
-                    "Composites in a different domain from their block",
-                    c(
-                        fint(cp.get("mismatch_count", 0)),
-                        "ok" if not cp.get("mismatch_count") else "warn",
-                    ),
-                ),
-                ("Composites with no coordinates", fint(cp.get("no_coordinates_count", 0))),
-            ]
-        ),
-        table(["Composite domain \\ block domain"] + block_doms, mat_rows),
-    ]
-
-    bias_rows = []
-    for r in cp.get("bias_table") or []:
-        status = r.get("status")
-        cls = {"ok": "ok", "warn": "warn", "fail": "bad"}.get(status, "info")
-        label = {"ok": "OK", "warn": "Check", "fail": "Large difference"}.get(status, DASH)
-        bias_rows.append(
-            [
-                r["domain"],
-                r["element"].upper(),
-                fint(r.get("composite_count")),
-                fint(r.get("blocks")),
-                fnum(r.get("tonnes"), 0),
-                fsig(r.get("composite_mean")),
-                fsig(r.get("nn_mean")),
-                fsig(r.get("bm_mean")),
-                fpct(r.get("diff_vs_composites_pct")),
-                fpct(r.get("diff_vs_nn_pct")),
-                fnum(r.get("variance_ratio_bm_nn"), 2),
-                c(label, cls),
-            ]
-        )
-    warn_pct, fail_pct = ctx.cfg.composites.bias_warn_pct, ctx.cfg.composites.bias_fail_pct
-    nn_txt = "; ".join(f"{el.upper()}: {src}" for el, src in (cp.get("nn_source") or {}).items())
-    out += [
-        h3("Model against composites and nearest neighbour"),
-        note(
-            "The status compares the model mean with the nearest-neighbour mean: "
-            f"more than {warn_pct:g}% apart is 'Check', "
-            f"more than {fail_pct:g}% is 'Large difference'. "
-            f"Nearest-neighbour source: {nn_txt or DASH}."
-        ),
-        table(
-            [
-                "Domain",
-                "Element",
-                "Composites",
-                "Blocks",
-                "Tonnes",
-                "Composite mean",
-                "Nearest-neighbour mean",
-                "Model mean",
-                "Model vs composites",
-                "Model vs nearest neighbour",
-                "Variance ratio (model / NN)",
-                "Status",
-            ],
-            bias_rows,
-        ),
-    ]
-    above = cp.get("above_comp_max") or {}
-    out += [
-        h4("Blocks above the highest composite in their domain") if above else None,
-        table(
-            ["Element", "Blocks"],
-            [[el.upper(), _count_cell(v["count"])] for el, v in above.items()],
-        ),
-    ]
-    out += [
-        h3("Grade-tonnage curves"),
-        note(
-            "Tonnes and average grade above each cutoff, model against nearest neighbour. "
-            "The model should be smoother (fewer tonnes at high cutoffs) but not far apart "
-            "overall."
-        ),
-        page.selector("gt_", "Domain and element"),
-        h3("Swath plots"),
-        note(
-            "Average grade along the model X, Y and Z axes. Grey bars are tonnes; bins with "
-            "very little tonnage are drawn in lighter grey. Hover over the red line for the "
-            "composite count."
-        ),
-        page.selector("swath_", "Domain and element"),
-    ]
     return _blocks(out)
 
 
@@ -1229,18 +1062,7 @@ def _flags(ctx: AuditContext, page: _Page) -> list[Block]:
         ),
         table(cols, rows_of(cat)),
     ]
-    if ctx.comp_flags is not None:
-        ccat = flag_catalog(ctx.comp_flags, template, ctx.comp_flags.n_rows)
-        out += [
-            h3("Composite flags"),
-            table(
-                ["Flag", "Check", "What it means", "Composites", "Share", "Leapfrog filter"],
-                rows_of(ccat),
-            ),
-        ]
     names = ["flagged_blocks_leapfrog.csv"]
-    if ctx.comp_flags is not None:
-        names.append("flagged_composites.csv")
     names += [f"{stem}.csv" for stem in ctx.tables]
     if ctx.cfg.export.full_model_flags:
         names.append("model_flags.parquet")
@@ -1283,7 +1105,6 @@ def render(ctx: AuditContext) -> str:
         "classification": _classification,
         "grades": _grades,
         "support": _support,
-        "composites": _composites,
         "flags": _flags,
     }
     tabs = []

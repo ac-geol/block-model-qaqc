@@ -2,9 +2,9 @@
 
     python scripts/benchmark.py <folder> [--rows 5000000]
 
-Writes a regular block model CSV with about ``--rows`` blocks and 100,000 composites into
-``<folder>`` (once), then runs the whole pipeline twice (first reading the CSV, then the cached
-copy): every check, the report (once built) and the export, printing the time each step takes.
+Writes a regular block model CSV with about ``--rows`` blocks into ``<folder>`` (once), then
+runs the whole pipeline twice (first reading the CSV, then the cached copy): every check, the
+report and the export, printing the time each step takes.
 """
 
 from __future__ import annotations
@@ -52,28 +52,6 @@ def write_model(path: Path, rows: int, seed: int = 0) -> None:
     frame.to_csv(path, index=False)
 
 
-def write_composites(path: Path, rows: int, n: int = 100_000, seed: int = 1) -> None:
-    """Composites scattered through the model above, with domains matching the layering."""
-    rng = np.random.default_rng(seed)
-    nz = 100
-    span = int(np.sqrt(rows / nz)) * 5.0
-    z = rng.uniform(0, nz * 2.5, n)
-    k = (z / 2.5).astype(int)
-    frame = pd.DataFrame(
-        {
-            "HOLEID": [f"DH{h:05d}" for h in np.arange(n) // 50],
-            "X": 500000.0 + rng.uniform(0, span, n),
-            "Y": 7000000.0 + rng.uniform(0, span, n),
-            "Z": z,
-            "LENGTH": 2.0,
-            "DOMAIN": np.where(k >= 60, "OX", np.where(k >= 10, "SUL", "0")),
-            "CU_PCT": np.round(rng.lognormal(-0.5, 0.8, n), 4),
-            "AU_GPT": np.round(rng.lognormal(-1.0, 1.0, n), 4),
-        }
-    )
-    frame.to_csv(path, index=False)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("folder", type=Path)
@@ -85,21 +63,17 @@ def main() -> None:
         t0 = time.perf_counter()
         write_model(csv, args.rows)
         print(f"wrote {csv} in {time.perf_counter() - t0:.1f} s")
-    comps = args.folder / "composites.csv"
-    if not comps.exists():
-        write_composites(comps, args.rows)
     cfg = config.from_dict(
         {
             "project_name": "benchmark",
             "paths": {
                 "block_model_csv": str(csv),
-                "composites_csv": str(comps),
                 "cache_dir": str(args.folder / "cache"),
                 "output_dir": str(args.folder / "outputs"),
             },
             "elements": {
-                "cu": {"canonical_unit": "pct", "ceiling": 34.6, "diagnostic_cutoff": 0.5},
-                "au": {"canonical_unit": "gpt", "ceiling": 500.0, "diagnostic_cutoff": 0.5},
+                "cu": {"unit": "pct", "ceiling": 34.6, "cutoff": 0.5},
+                "au": {"unit": "gpt", "ceiling": 500.0, "cutoff": 0.5},
             },
         }
     )

@@ -146,10 +146,8 @@ def test_null_threshold_skipped(run_checks):
         modules=("geometry",),
         settings={
             "support": {
-                "thresholds_by_rank": {
-                    3: {"nholes_min": 3, "max_pass": None},
-                    2: {"nholes_min": 2, "max_pass": None},
-                }
+                "measured": {"nholes_min": 3, "max_pass": None},
+                "indicated": {"nholes_min": 2, "max_pass": None},
             }
         },
     )

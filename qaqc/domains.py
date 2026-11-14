@@ -31,9 +31,10 @@ def waste_mask(bm: pd.DataFrame, cfg: ProjectConfig) -> np.ndarray:
 
 
 def class_ranks(bm: pd.DataFrame, cfg: ProjectConfig) -> tuple[np.ndarray, dict[str, int]]:
-    """Class rank per row (3 Measured, 2 Indicated, 1 Inferred, 0 Unclassified).
+    """Class number per row (3 Measured, 2 Indicated, 1 Inferred, 4 Exploration Target,
+    0 Unclassified).
 
-    Missing and unlisted codes are rank 0. Returns the ranks and the row count of each
+    Missing and unlisted codes are 0 (Unclassified). Returns the ranks and the row count of each
     unlisted code (codes are already normalized by reading, e.g. ``1.0`` -> ``"1"``).
     """
     n = len(bm)
@@ -72,11 +73,11 @@ def applicable_domains(ctx: AuditContext, element: str) -> list[str]:
     """Non-waste domains an element is estimated in (spec 7.4, item 2).
 
     With ``domains: auto`` (or an element not listed in the config), a domain counts if at
-    least ``elements.min_estimated_fraction`` of its analysed blocks have a value. A listed
+    least ``tolerances.min_estimated_fraction`` of its analysed blocks have a value. A listed
     domain list is used as given. Air and waste are never applicable.
     """
     cfg, bm = ctx.cfg, ctx.bm
-    el_cfg = cfg.elements.items.get(element)
+    el_cfg = cfg.elements.get(element)
     if el_cfg is not None and el_cfg.domains != "auto":
         return list(el_cfg.domains)
     dom = domain_labels(bm)
@@ -85,6 +86,6 @@ def applicable_domains(ctx: AuditContext, element: str) -> list[str]:
     out = []
     for code in sorted(set(dom[rows])):
         m = rows & (dom == code)
-        if m.any() and has_value[m].mean() >= cfg.elements.min_estimated_fraction:
+        if m.any() and has_value[m].mean() >= cfg.tolerances.min_estimated_fraction:
             out.append(code)
     return out

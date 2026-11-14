@@ -22,7 +22,7 @@ def make_demo_project(
     style: str = "datamine",
     seed: int = 0,
 ) -> Path:
-    """Write a demo block model, composites and project YAML into ``folder``.
+    """Write a demo block model and settings file into ``folder``.
 
     Args:
         folder: Where to write the files (created if needed; existing demo files are replaced).

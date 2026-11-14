@@ -336,7 +336,7 @@ def setup_grid(ctx: AuditContext) -> GridInfo:
         RotationNotSupported: The model is rotated.
         GridError: The model type or parent cell size cannot be worked out.
     """
-    bm, snap = ctx.bm, ctx.cfg.tolerances.coord_snap_m
+    bm, snap = ctx.bm, ctx.cfg.tolerances.coord_snap
     sources: dict[str, str] = {}
     az, sources["rotation"] = _rotation(ctx)
     vary = _sizes_vary(bm, snap)

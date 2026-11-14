@@ -1,75 +1,81 @@
 # Block model QA/QC
 
-Automated checks for mineral resource block models exported from Datamine, Isatis and
-Leapfrog. The checks cover grid and geometry, density, grades, classification, estimation
-support and composite validation. The outputs are an offline HTML report, a flagged-block CSV
-for Leapfrog and a machine-readable audit file.
+A high-level check of mineral resource block models exported from Datamine, Isatis and
+Leapfrog. It looks at the model grid and block geometry, density, grades, classification and
+the estimation details. The results are an offline HTML report, a file of flagged blocks to
+view in Leapfrog, and an audit file. Metric and imperial models are supported.
 
-The full specification is in `block_model_qaqc_spec.md`. Choices made along the way are in
-`DECISIONS.md`.
+**New to this? Start with [GETTING_STARTED.md](GETTING_STARTED.md).** It is a step-by-step
+guide for Windows that needs no programming knowledge.
+
+The original specification is in `block_model_qaqc_spec.md`. Changes from it, and the reasons,
+are in `DECISIONS.md`.
+
+## What is checked
+
+| Check | What it looks for |
+|---|---|
+| Grid and geometry | Duplicate blocks, blocks off the grid, sub-blocks overfilling their parent block, percentages above 100%; total volume and tonnage |
+| Density | Missing density, or density outside the allowed range |
+| Grades | Negative grades, grades above a ceiling, missing grades, grade in waste above a cutoff; statistics and contained metal by domain |
+| Classification | Codes not recognised, unclassified mineralised blocks; tonnage, grade and metal by class; the resource statement rebuilt above a cutoff |
+| Estimation details | Measured and Indicated blocks that fail your classification criteria (search pass, samples, holes, slope of regression, kriging efficiency) |
+
+Composite checks (bias against composites, grade-tonnage curves, swath plots) were removed in
+November 2026 to keep the tool a simple, high-level check.
 
 ## Status
 
 | Milestone | Content | State |
 |---|---|---|
 | M0 | Settings file, column recognition, header reading, synthetic test models | done |
-| M1 | Reading the data, placeholder clean-up, grid set-up, geometry, density | done, awaiting review |
-| M2 | Grades, units, classification, resource statement, estimation support | done, awaiting review |
-| M3 | Composites, bias, grade-tonnage curves, swaths | done, awaiting review |
-| M4 | Flag export, figures, HTML report, audit file | done, awaiting review |
-| M5 | Notebook, command line run, real model test | notebook and command line done; real model test to do |
+| M1 | Reading the data, placeholder clean-up, grid set-up, geometry, density | done |
+| M2 | Grades, units, classification, resource statement, estimation support | done |
+| M3 | Composites, bias, grade-tonnage curves, swaths | removed (Nov 2026) |
+| M4 | Flag export, figures, HTML report, audit file | done |
+| M5 | Notebook, command line run, real model test | real model test to do |
 
 ## Outputs
 
-Written to the output folder (`paths: output_dir` in the project file):
+Written to the output folder (`paths: output_dir` in the settings file):
 
 | File | What it is |
 |---|---|
 | `BM_QAQC_Report.html` | Full report with tables and charts. Opens in any browser, works offline. |
 | `flagged_blocks_leapfrog.csv` | Every flagged block, to import into Leapfrog as points. |
-| `composite_domain_mismatch.csv` | Composites outside the model or in a different domain from their block. |
-| `flagged_composites.csv` | Composites with a flag. |
 | `audit_bundle.json` | Every result in one machine-readable file. |
 | `model_flags.parquet` | Every block and every flag (only with `export: full_model_flags: true`). |
 
+## Settings
+
+- `config/project_example.yaml` has the settings most projects need, with a short note on
+  each. Copy it for each project.
+- `config/advanced_settings_reference.yaml` lists every other setting with its default.
+- A misspelled setting is reported, not ignored. A setting from an older version gets a
+  message saying what it is now called.
+
 ## Setup
 
-Works on Windows, macOS and Linux. Python 3.11 or newer is needed. The commands below call
-the project's own Python directly, so there is nothing to "activate" (this avoids the
-PowerShell script-permission error that activation can cause on work PCs).
+Windows: follow [GETTING_STARTED.md](GETTING_STARTED.md). In short, install `uv`, then
+double-click `setup_windows.bat`.
 
-**Windows (PowerShell or Command Prompt)**
-
-```powershell
-uv venv --python 3.11 .venv
-uv pip install --python .venv\Scripts\python.exe -e ".[dev,notebook]"
-```
-
-**macOS / Linux**
+From a terminal on any system (needs [uv](https://docs.astral.sh/uv/)):
 
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python -e ".[dev,notebook]"
 ```
 
-(`notebook` installs JupyterLab for the notebook below; leave it out if you use VS Code.)
+On Windows the Python path is `.venv\Scripts\python.exe` instead of `.venv/bin/python`. Below,
+`python` means that path. The `dev` extra adds the test tools. No `uv`? Use conda instead:
+`conda env create -f environment.yml`.
 
-`uv` is a small installer ([install instructions](https://docs.astral.sh/uv/)); on Windows,
-`winget install --id=astral-sh.uv -e` also works. No `uv`? Use conda instead:
-`conda env create -f environment.yml`, then `conda activate bm_qaqc`.
+## Running the checks
 
-Below, `python` means the project's Python: `.venv\Scripts\python.exe` on Windows,
-`.venv/bin/python` on macOS and Linux (or plain `python` inside the conda environment).
+**Windows, no terminal.** Drag your settings file onto `run_qaqc.bat`. `run_demo.bat` tries
+the tool on a made-up model, and `run_notebook.bat` opens the notebook.
 
-Tips for Windows:
-- In project YAML files, write paths with forward slashes (`C:/Projects/model.csv`) or in
-  single quotes if you use backslashes (see the note in `config/project_example.yaml`).
-- Close the CSV in Excel before running; Windows will not let two programs use it.
-- Keep the project and your data outside synced folders such as OneDrive if you can; syncing
-  can slow reading and lock the cache files.
-- Exports with decimal commas (for example `0,5`) are not supported yet.
-
-## Running the checks: the notebook
+### The notebook
 
 The easiest way to run everything is the notebook `notebooks/block_model_qaqc.ipynb`. It runs
 each step in order, with a short note on what it does and what to check, and shows the results
@@ -93,16 +99,17 @@ you can see every step working before using real data. To use your own model, co
 `DEMO = False` and `CONFIG_PATH` to your file. If a step finds a problem with the settings or
 the file, it stops with a short message saying what to fix.
 
-## Command line and Python (for scripting)
+### Command line and Python (for scripting)
 
 Run everything and write all the outputs in one go:
 
 ```
-python -m qaqc run config/my_project.yaml
+python -m qaqc run config/my_project.yaml --open
 ```
 
-It prints the errors and warnings, the flagged-block counts and the files written. Add
-`--no-cache` to read the CSV again, `-v` for detailed progress.
+It prints the errors and warnings, the flagged-block counts and the files written. `--open`
+opens the report when the run finishes. Add `--no-cache` to read the CSV again, and `-v` for
+detailed progress. `python -m qaqc demo --open` runs everything on a made-up model.
 
 Check how the columns of a block model CSV are recognised (fast; reads only the top):
 
@@ -117,28 +124,22 @@ from qaqc import pipeline
 
 ctx, files = pipeline.run_project("config/my_project.yaml")
 ctx.flags.counts()          # number of flagged blocks per check
-ctx.bundle["composites"]    # results of one check (also in audit_bundle.json)
+ctx.bundle["grades"]        # results of one check (also in audit_bundle.json)
 [w.message for w in ctx.warnings]
 ```
 
 Rotated block models are not supported yet. The run stops with a message if one is found.
 
-Time the whole run on a large made-up model (about 5 million blocks, 100,000 composites):
+Time the whole run on a large made-up model (about 5 million blocks):
 
 ```
 python scripts/benchmark.py qaqc_benchmark
 ```
 
-(The folder name can be anything; it is created if needed and holds about 400 MB.) On the
-development PC this took about 1 minute reading the CSV and 45 seconds from the cached copy.
+(The folder name can be anything. It is created if needed and holds about 400 MB.)
 
 Run the tests:
 
 ```
 python -m pytest
 ```
-
-## Project settings
-
-Copy `config/project_example.yaml` for each project. Every setting is explained in the file.
-A misspelled setting is reported as an error rather than ignored.

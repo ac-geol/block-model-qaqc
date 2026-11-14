@@ -18,6 +18,7 @@ from qaqc import config, schema
 from qaqc.context import prepare
 from qaqc.grid import GridError
 from qaqc.io import ReadError
+from qaqc.units import measure_units
 
 if TYPE_CHECKING:
     from pandas.io.formats.style import Styler
@@ -129,14 +130,14 @@ def config_summary(cfg: config.ProjectConfig) -> pd.DataFrame:
     return _table(
         [
             ("Project", cfg.project_name),
+            ("Units", cfg.units),
             ("Software", cfg.source_software),
             ("Block model CSV", _path_status(p.block_model_csv)),
-            ("Composites CSV", _path_status(p.composites_csv)),
             ("Output folder", str(p.output_dir)),
             ("Model type", m.model_type),
             ("Parent cell size", m.parent_cell_size or "from file"),
             ("Grid origin", m.grid_origin or "from file"),
-            ("Elements configured", ", ".join(cfg.elements.items) or "none"),
+            ("Elements configured", ", ".join(cfg.elements) or "none"),
             ("Column overrides", len(cfg.column_overrides)),
         ]
     )
@@ -245,19 +246,20 @@ def geometry_summary(ctx: AuditContext) -> pd.DataFrame:
     """Totals and grid check results."""
     r = ctx.bundle["geometry"]
     box = r.get("bounding_box", {})
+    mu = measure_units(ctx.cfg)
     rows: list[tuple[str, Any]] = [
         ("Model type", r["model_type"]),
         ("Parent cells", f"{r['parent_cells']:,}"),
         ("Blocks analysed", f"{r['blocks_analysed']:,}"),
-        ("Total volume (m³)", f"{r['total_volume_m3']:,.0f}"),
-        ("Total tonnes", f"{r['total_tonnes']:,.0f}"),
-        ("Blocks with no tonnes", f"{r['blocks_without_tonnes']:,}"),
+        (f"Total volume ({mu.volume})", f"{r['total_volume']:,.0f}"),
+        (f"Total tonnage ({mu.tonnage})", f"{r['total_tonnes']:,.0f}"),
+        ("Blocks with no tonnage", f"{r['blocks_without_tonnes']:,}"),
         ("Blocks with no coordinates", f"{r['blocks_without_coordinates']:,}"),
     ]
     for axis in ("x", "y", "z"):
         if box.get(axis):
             lo, hi = box[axis]
-            rows.append((f"Extent {axis.upper()}", f"{lo:,.1f} to {hi:,.1f}"))
+            rows.append((f"Extent {axis.upper()} ({mu.length})", f"{lo:,.1f} to {hi:,.1f}"))
     if "overfill" in r:
         o = r["overfill"]
         rows.append(("Overfilled parent cells", f"{o['parent_cells']:,} ({o['blocks']:,} blocks)"))
@@ -292,6 +294,10 @@ def density_summary(ctx: AuditContext) -> pd.DataFrame:
     return _table(
         [
             ("Blocks checked", f"{a['blocks_checked']:,}"),
+            (
+                "Allowed range (default)",
+                f"{a.get('default_range')} {measure_units(ctx.cfg).density}",
+            ),
             ("Waste checked too", "yes" if a["waste_checked"] else "no"),
             ("Missing density", f"{a['missing']:,}"),
             ("Below the allowed range", f"{a['low']:,}"),
@@ -380,7 +386,7 @@ def classification_inventory(ctx: AuditContext) -> pd.DataFrame:
 
 
 def unmapped_codes(ctx: AuditContext) -> pd.DataFrame:
-    """Class codes not in the rank map (treated as unclassified)."""
+    """Class codes not listed in the settings (treated as unclassified)."""
     return _records(ctx.bundle.get("classification", {}).get("unmapped_codes"), "code")
 
 
@@ -433,53 +439,6 @@ def support_passes(ctx: AuditContext) -> pd.DataFrame:
     """Tonnes by class and search pass."""
     pb = ctx.bundle.get("support", {}).get("pass_breakdown")
     return _records(pb.get("by_class") if pb else None)
-
-
-# --- composites ------------------------------------------------------------------------------
-
-
-def composites_summary(ctx: AuditContext) -> pd.DataFrame:
-    """Composites read, capping, and how many sit outside the model or in the wrong domain."""
-    r = ctx.bundle.get("composites", {})
-    if not r.get("loaded"):
-        return _table([("Composites", r.get("skipped", "not run"))])
-    capping = ", ".join(f"{el.upper()}: {c['method']}" for el, c in r["capping"].items())
-    return _table(
-        [
-            ("Composites read", f"{r['input']['rows']:,}"),
-            ("Capping", capping or "-"),
-            ("Outside the model", f"{r['outside_count']:,}"),
-            ("Domain differs from the block", f"{r['mismatch_count']:,}"),
-            ("No coordinates", f"{r['no_coordinates_count']:,}"),
-            ("Nearest-neighbour benchmark", str(r.get("nn_source"))),
-        ]
-    )
-
-
-def bias_table(ctx: AuditContext) -> Styler | pd.DataFrame:
-    """Block model vs composites vs nearest-neighbour, coloured by status."""
-    df = _records(ctx.bundle.get("composites", {}).get("bias_table"))
-    if df.empty:
-        return df
-    colours = {"fail": SEVERITY_COLOURS["error"], "warn": SEVERITY_COLOURS["warning"]}
-
-    def colour(row: pd.Series) -> list[str]:
-        bg = colours.get(row["status"], "")
-        return [f"background-color: {bg}" if bg else "" for _ in row]
-
-    return df.style.apply(colour, axis=1).format(precision=3).hide(axis="index")
-
-
-def domain_matrix(ctx: AuditContext) -> pd.DataFrame:
-    """Composite domain (rows) against the domain of the block it sits in (columns)."""
-    rows = ctx.bundle.get("composites", {}).get("domain_matrix")
-    if not rows:
-        return pd.DataFrame()
-    return (
-        pd.DataFrame(rows)
-        .pivot_table(index="composite_domain", columns="block_domain", values="count", fill_value=0)
-        .astype(int)
-    )
 
 
 def write_outputs(ctx: AuditContext) -> pd.DataFrame:

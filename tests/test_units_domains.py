@@ -18,15 +18,33 @@ def test_unit_factors():
     assert units.convert(0.5, "pct", "ppm") == 5_000
     assert units.convert(None, "pct", "ppm") is None
     with pytest.raises(ValueError):
-        units.factor("pct", "oz")
+        units.factor("pct", "lbs")
+
+
+def test_ounces_per_ton():
+    # 1 troy oz per short ton = 31.1034768 g / 0.90718474 t = 34.2857 g/t
+    assert units.factor("opt", "gpt") == pytest.approx(34.2857142857)
+    assert units.convert(1.0, "gpt", "opt") == pytest.approx(1 / 34.2857142857)
+    assert units.convert(0.5, "opt", "ppb") == pytest.approx(17142.857142857)
 
 
 def test_contained_metal():
-    assert units.contained_metal([100.0], [2.0], "pct")[0] == pytest.approx(2.0)
-    assert units.contained_metal([31.1035], [1.0], "gpt")[0] == pytest.approx(1.0)
-    assert units.contained_metal([31.1035], [1000.0], "ppb")[0] == pytest.approx(1.0)
-    assert np.isnan(units.contained_metal([1.0], [np.nan], "pct")[0])
-    assert units.metal_unit("pct") == "t" and units.metal_unit("ppm") == "oz"
+    # base metal: tonnes (or short tons) of metal, whatever the grade unit
+    assert units.contained_metal([100.0], [2.0], "pct", "pct")[0] == pytest.approx(2.0)
+    assert units.contained_metal([100.0], [20_000.0], "ppm", "pct")[0] == pytest.approx(2.0)
+    # precious metal in troy ounces
+    assert units.contained_metal([31.1034768], [1.0], "gpt", "gpt")[0] == pytest.approx(1.0)
+    assert units.contained_metal([31.1034768], [1000.0], "ppb", "gpt")[0] == pytest.approx(1.0)
+    # imperial: 1,000 short tons at 0.25 oz/ton = 250 oz
+    short = units.TONNES_PER_SHORT_TON
+    assert units.contained_metal([1000.0], [0.25], "opt", "gpt", short)[0] == pytest.approx(250)
+    # g/t grades on short-ton tonnage: 1,000 short tons = 907.18 t at 1 g/t = 29.17 oz
+    assert units.contained_metal([1000.0], [1.0], "gpt", "gpt", short)[0] == pytest.approx(
+        907.18474 / 31.1034768
+    )
+    assert np.isnan(units.contained_metal([1.0], [np.nan], "pct", "pct")[0])
+    assert units.metal_unit("pct") == "t" and units.metal_unit("gpt") == "oz"
+    assert units.metal_unit("pct", "imperial") == "short tons"
 
 
 def _cfg(**extra):
@@ -60,7 +78,7 @@ def test_applicable_domains_and_weights(run_checks):
     cu = ctx.schema.elements["cu"]
     assert units.element_threshold(ctx.cfg, cu, "ceiling") == pytest.approx(34.6)
     ppm = cu.__class__(**{**cu.__dict__, "unit": "ppm"})
-    assert units.element_threshold(ctx.cfg, ppm, "diagnostic_cutoff") == pytest.approx(5000)
+    assert units.element_threshold(ctx.cfg, ppm, "cutoff") == pytest.approx(5000)
 
 
 def test_weights_need_geometry(run_checks):

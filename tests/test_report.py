@@ -84,10 +84,7 @@ def test_every_figure_is_drawn_from_json(reports):
         assert "data" in fig and "layout" in fig
     for name in ("density_box", "classification_bar", "support_box", "cdf_cu"):
         assert name in ctx.figures
-    assert any(n.startswith("swath_") for n in ctx.figures)
-    assert any(n.startswith("gt_") for n in ctx.figures)
-    # one selector option per swath and per grade-tonnage figure, nothing drawn until chosen
-    assert text.count('data-selector="swath"') == 1 and text.count('data-selector="gt"') == 1
+    assert not any(n.startswith(("swath_", "gt_")) for n in ctx.figures)
 
 
 def test_cdn_mode_has_no_embedded_plotly(tmp_path):
@@ -130,14 +127,6 @@ def test_density_vs_grade_log_axis(tmp_path):
     assert "not shown" in fig.layout.title.text  # the planted negative grades are counted
 
 
-def test_no_composites_renders_with_skipped_notes(tmp_path):
-    ctx, path = _run(tmp_path, settings={"paths": {"composites_csv": None}})
-    text = path.read_text(encoding="utf-8")
-    assert "Skipped because no composites file configured" in text
-    assert not any(n.startswith(("swath_", "gt_")) for n in ctx.figures)
-    assert "density_box" in ctx.figures
-
-
 def _drop_columns(model, folder: Path) -> None:
     path = folder / "block_model.csv"
     df = pd.read_csv(path, dtype=str, keep_default_na=False)
@@ -146,11 +135,7 @@ def _drop_columns(model, folder: Path) -> None:
 
 
 def test_missing_classification_and_metadata_render(tmp_path):
-    ctx, path = _run(
-        tmp_path,
-        settings={"paths": {"composites_csv": None}},
-        edit_model=_drop_columns,
-    )
+    ctx, path = _run(tmp_path, edit_model=_drop_columns)
     text = path.read_text(encoding="utf-8")
     assert "Skipped because no classification column" in text
     assert "Skipped because no estimation detail columns" in text
@@ -170,13 +155,10 @@ def test_modules_not_run_still_render(tmp_path):
 
 
 def _hostile_domain(model, folder: Path) -> None:
-    for name, col in (("block_model.csv", "KZONE"), ("composites.csv", None)):
-        path = folder / name
-        df = pd.read_csv(path, dtype=str, keep_default_na=False)
-        cols = [col] if col else [c for c in df.columns if c.upper() in ("DOMAIN", "KZONE", "ZONE")]
-        for c in cols:
-            df[c] = df[c].replace({"SUL": HOSTILE})
-        df.to_csv(path, index=False)
+    path = folder / "block_model.csv"
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    df["KZONE"] = df["KZONE"].replace({"SUL": HOSTILE})
+    df.to_csv(path, index=False)
 
 
 def test_text_from_the_data_is_escaped(tmp_path):
@@ -232,15 +214,4 @@ def test_pipeline_writes_report_before_export(tmp_path):
     bundle = json.loads(files["audit_bundle.json"].read_text(encoding="utf-8"))
     assert "figures" in bundle["metadata"]["timings_s"]
     text = files[report.REPORT_NAME].read_text(encoding="utf-8")
-    # the uncapped-composites badge and the bias table come from the composite results
-    assert "Composites" in text and "Model against composites and nearest neighbour" in text
-
-
-def test_uncapped_composites_show_red_badge(tmp_path):
-    m = make_model("regular", style="datamine", composites_capped=False)
-    m.write(tmp_path)
-    cfg = config.from_dict(m.config_dict(), base_dir=tmp_path)
-    ctx = prepare(cfg, use_cache=False)
-    pipeline.run_checks(ctx)
-    text = report.write_report(ctx).read_text(encoding="utf-8")
-    assert '<div class="badge bad">Composites are uncapped' in text
+    assert "Composite validation" not in text and "nearest neighbour" not in text

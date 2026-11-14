@@ -187,7 +187,7 @@ def test_volume_and_tonnes(run_checks, kind):
     t = m.truth
     use = (t["selected"] & ~t["is_air"]).to_numpy()
     geo = ctx.bundle["geometry"]
-    assert geo["total_volume_m3"] == pytest.approx(t.loc[use, "vol"].sum(), rel=1e-12)
+    assert geo["total_volume"] == pytest.approx(t.loc[use, "vol"].sum(), rel=1e-12)
     tonnes = (t["vol"] * t["sg"].astype(np.float32).astype(np.float64))[use]
     assert geo["total_tonnes"] == pytest.approx(np.nansum(tonnes), rel=1e-9)
     assert geo["blocks_without_tonnes"] == int(t.loc[use, "sg"].isna().sum())
@@ -208,9 +208,9 @@ def test_wireframe_volumes(run_checks):
     ox = float(t.loc[t["selected"] & (t["domain"] == "OX"), "vol"].sum())
     ctx = run_checks(m, settings={"target_wireframe_volumes": {"OX": ox * 1.02, "SUL": 1000.0}})
     rows = {r["domain"]: r for r in ctx.bundle["geometry"]["wireframe_volumes"]}
-    assert rows["OX"]["model_volume_m3"] == pytest.approx(ox)
+    assert rows["OX"]["model_volume"] == pytest.approx(ox)
     assert rows["OX"]["difference_pct"] == pytest.approx((1 / 1.02 - 1) * 100)
-    assert rows["SUL"]["wireframe_volume_m3"] == 1000.0
+    assert rows["SUL"]["wireframe_volume"] == 1000.0
 
 
 # --- sub-block estimation support --------------------------------------------------------------

@@ -53,7 +53,7 @@ def test_column_types(run_checks):
     bm = ctx.bm
     for c in ("x", "y", "z", "dx", "dy", "dz"):
         assert bm[c].dtype == np.float64, c
-    for c in ("cu", "au", "cu_nn", "sg", "nsamples"):
+    for c in ("cu", "au", "sg", "nsamples"):
         assert bm[c].dtype == np.float32, c
     assert isinstance(bm["domain"].dtype, pd.CategoricalDtype)
     assert isinstance(bm["classif"].dtype, pd.CategoricalDtype)

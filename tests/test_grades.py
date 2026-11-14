@@ -41,11 +41,12 @@ def test_not_estimated_domain_is_reported_not_flagged(run_checks):
     assert row["status"] == grades.NOT_ESTIMATED
 
 
-def test_unit_conversion_of_thresholds(run_checks):
-    ctx = _run(run_checks, make_model("regular"), {"elements": {"cu": {"unit": "ppm"}}})
+def test_thresholds_are_in_the_settings_unit(run_checks):
+    settings = {"elements": {"cu": {"unit": "ppm", "ceiling": 346000, "cutoff": 5000}}}
+    ctx = _run(run_checks, make_model("regular"), settings)
     th = ctx.bundle["grades"]["elements"]["cu"]["thresholds"]
     assert th["ceiling"] == pytest.approx(346000)
-    assert th["diagnostic_cutoff"] == pytest.approx(5000)
+    assert th["cutoff"] == pytest.approx(5000)
     assert th["unit"] == "ppm"
 
 
@@ -68,7 +69,7 @@ def test_unit_likely_wrong_warning(run_checks):
 
 def test_null_thresholds_skip_checks(run_checks):
     m = make_model("regular")
-    ctx = _run(run_checks, m, {"elements": {"cu": {"ceiling": None, "diagnostic_cutoff": None}}})
+    ctx = _run(run_checks, m, {"elements": {"cu": {"ceiling": None, "cutoff": None}}})
     cu = ctx.bundle["grades"]["elements"]["cu"]
     assert {s["check"] for s in cu["skipped_checks"]} == {"FLAG_CEILING_CU", "FLAG_BLEED_CU"}
     assert ctx.bundle["grades"]["flags"]["FLAG_CEILING_CU"] == 0
@@ -79,7 +80,7 @@ def test_null_thresholds_skip_checks(run_checks):
 
 def test_element_without_config_runs_without_thresholds(run_checks):
     ctx = run_checks(make_model("regular"), modules=("geometry",))
-    ctx.cfg.elements.items.pop("au")
+    ctx.cfg.elements.pop("au")
     ctx.schema.elements["au"].configured = False
     grades.run(ctx)
     au = ctx.bundle["grades"]["elements"]["au"]

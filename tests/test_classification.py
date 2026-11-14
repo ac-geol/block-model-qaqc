@@ -26,7 +26,7 @@ def test_flag_and_unmapped_counts(run_checks, kind, style):
     )
     got = {r["code"]: r["blocks"] for r in res["unmapped_codes"]}
     assert got == m.expected["unmapped_codes"]
-    assert any("not in the rank map" in w.message for w in ctx.warnings)
+    assert any("not listed under classification" in w.message for w in ctx.warnings)
     json.dumps(ctx.bundle["classification"])
 
 
@@ -38,7 +38,7 @@ def test_inventory_adds_up(run_checks, kind):
     res = ctx.bundle["classification"]
     geo = ctx.bundle["geometry"]
     assert sum(r["tonnes"] for r in res["inventory"]) == pytest.approx(geo["total_tonnes"])
-    assert sum(r["volume_m3"] for r in res["inventory"]) == pytest.approx(geo["total_volume_m3"])
+    assert sum(r["volume"] for r in res["inventory"]) == pytest.approx(geo["total_volume"])
     assert sum(r["blocks"] for r in res["inventory"]) == geo["blocks_analysed"]
     assert sum(r["tonnes"] for r in res["by_class"]) == pytest.approx(geo["total_tonnes"])
     # shares of each domain add to 100
@@ -124,7 +124,11 @@ def test_resource_statement_waste_and_unit_conversion(run_checks):
     ctx = _hand_model(run_checks, {"element": "cu", "value": 0.3}, include_waste=True)
     classification.run(ctx)
     st = ctx.bundle["classification"]["resource_statement"]
-    assert st["total"]["tonnes"] == pytest.approx(1600.0)
+    # the waste block is listed (Unclassified), but the total is Measured + Indicated + Inferred
+    by_class = {r["class"]: r for r in st["by_class"]}
+    assert by_class["Unclassified"]["tonnes"] == pytest.approx(1000.0)
+    assert st["total"]["tonnes"] == pytest.approx(600.0)
+    assert st["total_classes"] == ["Measured", "Indicated", "Inferred"]
     # cutoff is in canonical units: 0.3 pct is 3000 ppm in a ppm column
     ctx2 = _hand_model(run_checks, {"element": "cu", "value": 0.3})
     ctx2.schema.elements["cu"].unit = "ppm"
@@ -135,6 +139,29 @@ def test_resource_statement_waste_and_unit_conversion(run_checks):
     assert st2["total"]["tonnes"] == pytest.approx(600.0)
     # metal stays in tonnes of metal (canonical unit), DECISIONS.md 9
     assert st2["total"]["metal"]["cu"] == pytest.approx(3.6)
+
+
+def test_exploration_target_is_its_own_class(run_checks):
+    ctx = _hand_model(run_checks, {"element": "cu", "value": 0.3})
+    bm = ctx.bm
+    # the Inferred OX block becomes an Exploration Target (code 4), the waste block "ET"
+    bm.loc[bm.index[3], "classif"] = "4"
+    bm.loc[bm.index[4], ["classif", "domain"]] = ["ET", "SUL"]
+    classification.run(ctx)
+    res = ctx.bundle["classification"]
+    assert [r["class"] for r in res["by_class"]] == [
+        "Measured",
+        "Indicated",
+        "Exploration Target",
+    ]
+    et = next(r for r in res["by_class"] if r["class"] == "Exploration Target")
+    assert et["rank"] == 4 and et["tonnes"] == pytest.approx(1200.0)
+    assert res["unmapped_codes"] == []
+    # mineralised Exploration Target blocks are not "unclassified but mineralised"
+    assert res["unclassified_mineralized"]["blocks"] == 0
+    st = res["resource_statement"]
+    assert st["total"]["tonnes"] == pytest.approx(400.0)  # Measured + Indicated only
+    assert {r["class"] for r in st["by_class"]} == {"Measured", "Indicated", "Exploration Target"}
 
 
 def test_no_statement_by_default(run_checks):
@@ -151,7 +178,7 @@ def test_null_cutoff_elements_do_not_count(run_checks):
     ctx = run_checks(
         m,
         modules=("geometry",),
-        settings={"elements": {"au": {"diagnostic_cutoff": None}}},
+        settings={"elements": {"au": {"cutoff": None}}},
     )
     classification.run(ctx)
     res = ctx.bundle["classification"]["unclassified_mineralized"]
@@ -161,7 +188,7 @@ def test_null_cutoff_elements_do_not_count(run_checks):
 
 def test_no_classification_column(run_checks):
     ctx = run_checks(make_model("regular"), modules=("geometry",))
-    ctx.bm.drop(columns=["classif"], inplace=True)
+    ctx.bm = ctx.bm.drop(columns=["classif"])
     classification.run(ctx)
     assert ctx.bundle["classification"]["skipped"]
     assert any(w.severity == "error" for w in ctx.warnings)

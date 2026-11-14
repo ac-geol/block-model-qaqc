@@ -35,7 +35,7 @@ samples, which have not been supplied yet.
 8. **Wording fix in spec 7.5, check 3.** "Any element with a cutoff >= its converted
    diagnostic cutoff" is read as "any element with a **grade** at or above its diagnostic
    cutoff".
-9. **Units for contained metal.** These follow the element's standard (canonical) unit, not
+9. *(Updated by decision 62.)* **Units for contained metal.** These follow the element's standard (canonical) unit, not
    the column's unit. Base metals (pct) are reported in tonnes of metal, and precious metals
    (g/t) in ounces. Copper stored in ppm is still reported in tonnes, not ounces.
 10. **Where estimation details come from (spec 7.6).** Chosen for each detail separately. A
@@ -44,9 +44,9 @@ samples, which have not been supplied yet.
 11. **Missing estimation details in the support check.** If a Measured or Indicated block has
     no value for a detail (for example sample count), that is not counted as a failure. Those
     blocks are counted and reported separately for each condition.
-12. **Composite grades used for benchmarks.** The nearest-neighbour benchmark and the "above
+12. *(Removed with the composite checks, decision 59.)* **Composite grades used for benchmarks.** The nearest-neighbour benchmark and the "above
     the highest composite" check both use capped composite grades.
-13. **Other composite details.**
+13. *(Removed with the composite checks, decision 59.)* **Other composite details.**
     - Grade-tonnage cutoffs are evenly spaced on the tonnage-weighted grade distribution,
       from the 0th to the 99th percentile.
     - Swath composite averages are length-weighted when a length column is found.
@@ -89,7 +89,7 @@ samples, which have not been supplied yet.
     with the same layout as `qaqc/aliases.yaml`, and its names are added to the built-in
     ones.
 22. **Relative paths in the project YAML** are read from the folder that holds the YAML file.
-23. **Composite depth columns.** The spec allows length = `to - from` but gives no names for
+23. *(Removed with the composite checks, decision 59.)* **Composite depth columns.** The spec allows length = `to - from` but gives no names for
     these columns. Added: `from, from_m, depth_from, mfrom` and `to, to_m, depth_to, mto`.
 24. **Brought forward from later milestones.**
     - Rotation helpers (`qaqc/grid.py`), because the Isatis header reader and the generator
@@ -170,7 +170,7 @@ samples, which have not been supplied yet.
 42. **Shared helpers.** Units, thresholds in the column's unit, contained metal
     (`qaqc/units.py`), and domain, waste, class rank, weights and "where is an element
     estimated" (`qaqc/domains.py`) are worked out in one place so every module agrees.
-43. **Contained metal** is worked out after converting grades to the element's canonical unit
+43. *(Updated by decision 62.)* **Contained metal** is worked out after converting grades to the element's canonical unit
     (tonnes of metal for percent elements, troy ounces for g/t, ppm and ppb). So a copper
     column in ppm still gives tonnes of copper. No density column: no metal, with a note.
 44. **Thresholds in the results are in the column's unit**, and the unit is recorded beside
@@ -190,20 +190,20 @@ samples, which have not been supplied yet.
 50. **Pass and class breakdowns** include blocks with no pass value as "pass: none". "% of
     row tonnes" is the share within that class or domain. Support statistics are
     tonnes-weighted.
-51. **Composite domain check on percentage models**: a composite is a mismatch only if its
+51. *(Removed with the composite checks, decision 59.)* **Composite domain check on percentage models**: a composite is a mismatch only if its
     domain is not among the rows at that block centre. A composite whose label is swapped
     inside a contact cell holding both domains is therefore not caught (the synthetic test
     pins this: 3 of 4 planted swaps found in percentage models).
-52. **Composite containment** is tested against the 8 nearest block centres, then 64 for
+52. *(Removed with the composite checks, decision 59.)* **Composite containment** is tested against the 8 nearest block centres, then 64 for
     composites not yet matched (needed for sub-blocked models). Air blocks are not tested,
     so a composite in air counts as outside. Composites with no coordinates are counted
     separately and are neither outside nor mismatched.
-53. **Bias table, grade-tonnage curves and swaths leave out negative grades and grades above
+53. *(Removed with the composite checks, decision 59.)* **Bias table, grade-tonnage curves and swaths leave out negative grades and grades above
     the ceiling.** These are errors flagged by the grades checks, not smoothing; a few
     planted ones changed the bias by up to 200%. `FLAG_ABOVE_COMP_MAX` still uses all blocks.
-54. **Grade-tonnage cutoffs** start at the lowest grade of either model, then follow block
+54. *(Removed with the composite checks, decision 59.)* **Grade-tonnage cutoffs** start at the lowest grade of either model, then follow block
     model grade quantiles up to P99. Both curves use only blocks where both values exist.
-55. **The computed nearest-neighbour model** uses every composite in the domain, including
+55. *(Removed with the composite checks, decision 59.)* **The computed nearest-neighbour model** uses every composite in the domain, including
     ones flagged as outside or mismatched. `composites.caps` values are in the composites
     file's units.
 56. **Export.** Flag share (`pct`) is of all rows read. `FLAG_REASONS` is built flag by flag
@@ -217,6 +217,78 @@ samples, which have not been supplied yet.
 58. **Run order.** `qaqc/pipeline.py` runs reading, the checks in a fixed order (geometry
     first), the report, then the export (which lists the report). `python -m qaqc run`
     uses it.
+
+## Changed after your review (13 Nov 2026)
+
+59. **Composite checks removed** (your decision). The tool is a high-level check of the block
+    model, not a full validation. Removed:
+    - reading a composites file;
+    - capping, the composite domain check and the composite flags and output files;
+    - the bias table against composites and the nearest-neighbour model;
+    - grade-tonnage curves and swath plots;
+    - the `FLAG_ABOVE_COMP_MAX_<EL>` flag.
+
+    Nearest-neighbour columns in the block model are still recognised, so they are not
+    mistaken for the main grade, but they are not read or used.
+60. **Simpler settings file.** The example file holds only the settings most projects need.
+    Everything else keeps its default and is listed in
+    `config/advanced_settings_reference.yaml`. The changes:
+    - Each element is one line: `cu: {column: ..., unit: ..., ceiling: ..., cutoff: ...}`.
+      `column` replaces `column_overrides: cu.primary` (that form still works).
+      `canonical_unit` is gone. `diagnostic_cutoff` is now `cutoff`.
+    - Classification codes are four plain lists (`measured`, `indicated`, `inferred`,
+      `unclassified`) instead of a code-to-number map. The class names are fixed.
+    - `density: default_bounds` is now `range`, and `domain_bounds` is now `domain_ranges`.
+    - `support: thresholds_by_rank: {3: ..., 2: ...}` is now `support: measured` and
+      `support: indicated`.
+    - `elements: min_estimated_fraction` moved to `tolerances`, and `coord_snap_m` is now
+      `coord_snap` (it is in feet for imperial models).
+
+    An old settings file stops with a list of each old name and what replaces it.
+61. **Imperial units** (your decision: coordinates are always in feet for imperial models).
+    One setting, `units: metric | imperial`. Imperial means:
+    - coordinates and block sizes in feet, and volume in ft³;
+    - density in short tons per cubic foot, with a default allowed range of 0.045 to 0.175
+      (the same as 1.5 to 5.5 t/m³);
+    - tonnage in short tons, so contained base metal is in short tons;
+    - precious metal grades in oz/ton (troy ounces per short ton) unless the column name or
+      the settings say otherwise.
+
+    Labels in the report and notebook follow the setting. Result keys that end in `_m3` were
+    renamed without the unit (for example `total_volume`). Keys named `tonnes` hold tonnage in
+    the project's unit; `audit_bundle.json` records the units in `metadata: units`.
+62. **Grade units and thresholds.** `opt` (oz/ton, 1 oz/ton = 34.2857 g/t) is a grade unit.
+    It is recognised from column names such as `AU_OPT`, `Au oz/t`, `AU_OZT` or `Au oz/ton`.
+    - Ceiling, cutoff and the resource cutoff are written in the element's `unit` from the
+      settings.
+    - If no unit is set, they are in the element's default unit and converted to the column's
+      unit. The default is % for base metals, and g/t (metric) or oz/ton (imperial) for
+      precious metals.
+    - Contained metal is tonnes or short tons of metal for base metals, and troy ounces for
+      precious metals, whatever unit the grade column uses. Short tons are converted to
+      tonnes (0.90718474) before grams are turned into ounces.
+63. **Easier to run on Windows.**
+    - Four double-click files: `setup_windows.bat` (one-time setup), `run_demo.bat`,
+      `run_qaqc.bat` (drag a settings file onto it) and `run_notebook.bat`.
+    - New command `python -m qaqc demo` and option `run --open` (opens the report when the
+      run finishes).
+    - `GETTING_STARTED.md` is a step-by-step guide for people new to the terminal.
+    - The `.bat` files have not been tried on Windows yet.
+
+64. **Exploration Target class** (your request, 13 Nov 2026). A fifth class, `classification:
+    exploration_target`, defaults to codes `4`, `ET` and `EXPLORATION TARGET`. Code `4` no
+    longer means Unclassified.
+    - Exploration Target blocks are shown as their own class, after Inferred, in every table,
+      chart and export.
+    - They are not flagged as "unclassified but mineralised". Only Unclassified blocks are.
+    - They have no estimation support limits, the same as Inferred.
+    - Inside the program it is class number 4, so Measured, Indicated and Inferred keep 3, 2
+      and 1. The flagged-blocks file has a `CLASS` column with the class name, next to
+      `CLASS_RANK`.
+65. **Resource statement total** is Measured + Indicated + Inferred. Exploration Target and
+    Unclassified blocks above the cutoff are still listed by class, but not added to the
+    total, so the total can be compared directly with a published statement. Before this
+    change, Unclassified blocks were included in the total.
 
 ## Open — to settle in a later milestone
 

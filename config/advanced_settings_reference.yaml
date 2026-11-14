@@ -1,0 +1,130 @@
+# =============================================================================================
+# Block model QA/QC: ALL settings (advanced reference)
+# =============================================================================================
+# You do not need this file to run the checks: start from project_example.yaml.
+# This file lists every setting with its default value and what it does. To change one, copy
+# that line (with the section heading above it) into your own project file.
+#
+# This file is also a valid project file: every value here is the default.
+
+project_name: "All settings with their defaults"
+units: metric                  # metric | imperial (see project_example.yaml)
+
+# Which software wrote the file: auto | datamine | isatis | leapfrog.
+# auto = recognised from the header lines and column names. Set it if the guess is wrong.
+source_software: auto
+
+paths:
+  block_model_csv: ../data/block_model.csv
+  output_dir: ../qaqc_outputs/
+  # A cleaned copy of the block model is saved here so the next run is faster. It is
+  # rebuilt automatically when the CSV or the placeholder settings change.
+  cache_dir: ../.qaqc_cache/
+  # Optional YAML file adding your own column names to the built-in lists (same layout as
+  # qaqc/aliases.yaml). null = none.
+  extra_aliases: null
+
+# Name the column for a role when the automatic matching is wrong or undecided.
+# Possible entries:
+#   x, y, z, dx, dy, dz, domain, sg, classif, pct, topo_pct, selection,
+#   x_origin, y_origin, z_origin, nx, ny, nz, ijk
+#   pass_num, nsamples, nholes, min_dist, avg_dist, kriging_var, kriging_std, kriging_eff,
+#   slope_reg, status                          (estimation details for the whole model)
+#   cu.primary (same as elements: cu: column:), cu.nsamples, cu.slope_reg ... (per element)
+column_overrides: {}
+
+model:
+  # auto | regular | sub_blocked | percentage. auto = worked out from the columns.
+  model_type: auto
+  # Parent block size [DX, DY, DZ] in the model's length unit. null = read from the file
+  # header, otherwise worked out from the blocks.
+  parent_cell_size: null
+  # Model corner [X0, Y0, Z0]. null = header, Datamine origin columns, then worked out.
+  grid_origin: null
+  rotation:
+    # Rotated models are not supported yet: any value other than 0 or null stops the run.
+    azimuth_deg: null
+  # true if the coordinates in the file are already in model (unrotated) space.
+  coords_are_local: false
+  # Percentage models: are percentages 0-1 (fraction) or 0-100 (percent)? auto = guessed.
+  pct_scale: auto
+  # Percentage models: columns multiplied into the parent volume: [pct] or [pct, topo_pct].
+  volume_factors: [pct]
+  # Sub-blocked models: were grades estimated per parent block or per sub-block?
+  # null = not checked; parent | subblock = flag parent blocks that do not match.
+  expected_estimation_support: null
+  # true for regular sub-block grids (e.g. Leapfrog): sub-blocks must sit on the sub-grid.
+  subblock_grid_check: false
+
+# Values in the file that mean "no value". Matched without regard to upper/lower case.
+sentinels:
+  numeric: [-99, -999, -9999, -1.0e30, 1.0e30]   # not applied to coordinates
+  abs_threshold: 1.0e20                          # any value this large is "no value"
+  strings: ["", "-", "*", "N/A", "NA", "null", "empty", "Outside", "Without value", "Blank", "Error"]
+
+domains:
+  waste_codes: ["0", "99", "999", "WASTE", "OVB", "UNMIN"]
+  air_codes: ["AIR"]
+  # Isatis selection column: leave out rows where it is 0.
+  selection_excludes_zero: true
+
+classification:
+  measured: ["1", "MEAS", "MEASURED"]
+  indicated: ["2", "IND", "INDICATED"]
+  inferred: ["3", "INF", "INFERRED"]
+  exploration_target: ["4", "ET", "EXPLORATION TARGET", "EXPLORATION_TARGET"]
+  unclassified: ["0", "99", "UNCLASS", "UNCLASSIFIED", "NONE"]
+
+# Every element setting (all optional):
+#   column, unit, ceiling, cutoff: see project_example.yaml
+#   domains: auto, or a list of the domain codes the element is estimated in. auto = any
+#            non-waste domain where at least 1% of blocks have a grade (see tolerances).
+# Element symbols the tool knows: cu, ni, co, fe, s, zn, pb, au, ag, pd, pt.
+elements:
+  cu: {column: null, unit: auto, ceiling: null, cutoff: null, domains: auto}
+
+density:
+  range: null          # null = 1.5 to 5.5 t/m3 (metric) or 0.045 to 0.175 short tons/ft3
+  # A different range for some domains, e.g. {"LIM": [1.0, 2.2], "MSU": [3.0, 7.5]}
+  domain_ranges: {}
+  # Also check density in waste domains (needed for waste tonnage).
+  check_waste: true
+
+support:
+  # Whose per-element estimation details to use when the model has no model-wide ones
+  # (e.g. Leapfrog "OK Cu: NS"). auto = the listed element with the most details.
+  element: auto
+  measured: {nholes_min: 3, nsamples_min: 8, slope_reg_min: 0.80, kriging_eff_min: 0.50, max_pass: 1}
+  indicated: {nholes_min: 2, nsamples_min: 4, slope_reg_min: 0.50, kriging_eff_min: 0.30, max_pass: 2}
+
+reporting:
+  resource_cutoff: null
+  # Include waste domains in the rebuilt resource statement.
+  include_waste_in_statement: false
+
+# Wireframe volumes to compare with the model, by domain, in m3 (metric) or ft3 (imperial).
+# Example: {"OX": 1250000, "SUL": 3400000}. Empty = skip.
+target_wireframe_volumes: {}
+
+tolerances:
+  # Coordinates closer than this (m or ft) count as the same position.
+  coord_snap: 0.001
+  # Sub-blocks may overfill their parent block by this fraction before being flagged.
+  overfill_frac: 0.001
+  # Sub-block grades that differ by less than this count as the same grade.
+  subblock_grade_std: 1.0e-4
+  # elements: domains: auto -> an element counts as estimated in a domain when at least
+  # this fraction of its blocks have a grade.
+  min_estimated_fraction: 0.01
+
+report:
+  # inline = the report works without internet (bigger file); cdn = loads charts online.
+  plotly_js: inline
+  # Most points drawn in a scatter plot.
+  max_scatter_points: 15000
+  # Filter text shown for each flag, to paste into Leapfrog (to be verified in Leapfrog).
+  leapfrog_filter_template: "{flag} = 1"
+
+export:
+  # Also write model_flags.parquet with every block and every flag (large file).
+  full_model_flags: false

@@ -27,6 +27,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from qaqc import units
 from qaqc.config import ProjectConfig
 from qaqc.grid import local_offset_to_world
 
@@ -56,10 +57,6 @@ STRUCTURAL_LABELS: dict[str, str] = {
     "ny": "Number of blocks in Y",
     "nz": "Number of blocks in Z",
     "ijk": "Block index (IJK)",
-    "length": "Composite length",
-    "from_depth": "Composite from depth",
-    "to_depth": "Composite to depth",
-    "hole_id": "Drill hole ID",
 }
 
 METADATA_LABELS: dict[str, str] = {
@@ -155,14 +152,11 @@ class Aliases:
 
     structural: dict[str, dict[str, list[str]]]
     required_structural: list[str]
-    composite_structural: dict[str, dict[str, list[str]]]
-    composite_required_structural: list[str]
     elements: dict[str, list[str]]
     canonical_units: dict[str, str]
     estimator_tokens: set[str]
     nn_estimators: set[str]
     unit_tokens: dict[str, list[str]]
-    cap_tokens: set[str]
     metadata: dict[str, dict[str, Any]]
 
     @property
@@ -213,14 +207,11 @@ def load_aliases(extra: str | Path | None = None) -> Aliases:
     return Aliases(
         structural=data["structural"],
         required_structural=list(data["required_structural"]),
-        composite_structural=data["composite_structural"],
-        composite_required_structural=list(data["composite_required_structural"]),
         elements={k: [str(n) for n in v] for k, v in data["elements"].items()},
         canonical_units=dict(data["canonical_units"]),
         estimator_tokens={str(t) for t in data["estimator_tokens"]},
         nn_estimators={str(t) for t in data["nn_estimators"]},
         unit_tokens={k: [str(t) for t in v] for k, v in data["unit_tokens"].items()},
-        cap_tokens={str(t) for t in data["cap_tokens"]},
         metadata=data["metadata"],
     )
 
@@ -476,9 +467,11 @@ class ElementSchema:
     element: str
     primary: str  # main grade estimate column
     estimator: str | None  # method word on the main column, if any
-    unit: str  # pct | ppm | ppb | gpt
+    unit: str  # unit of the grade column: pct | ppm | ppb | gpt | opt
     unit_source: str  # config | column_name | assumed
-    canonical_unit: str
+    canonical_unit: str  # kind of element: pct = base metal, gpt = precious metal
+    threshold_unit: str  # unit the ceiling, cutoff and resource cutoff are written in
+    metal_unit: str  # contained metal: t, short tons or oz
     configured: bool  # listed under `elements` in the config
     nn_col: str | None = None  # nearest-neighbour benchmark in the model
     check_estimators: list[str] = field(default_factory=list)
@@ -536,6 +529,8 @@ class ResolvedSchema:
                     "unit": v.unit,
                     "unit_source": v.unit_source,
                     "canonical_unit": v.canonical_unit,
+                    "threshold_unit": v.threshold_unit,
+                    "metal_unit": v.metal_unit,
                     "configured": v.configured,
                     "nn_col": v.nn_col,
                     "check_estimators": list(v.check_estimators),
@@ -567,7 +562,7 @@ def _describe_standard(standard: str) -> str:
     if part == "primary":
         return f"{name} grade (main estimate)"
     if part == "nn":
-        return f"{name} nearest-neighbour grade (benchmark)"
+        return f"{name} nearest-neighbour grade (recognised, not used)"
     if part == "check":
         return f"{name} alternative estimate (listed, not checked)"
     if part in METADATA_LABELS:
@@ -594,7 +589,6 @@ class _Parsed:
     element: str
     estimator: str | None
     unit: str | None
-    capped: bool
     metadata: str | None  # None = grade column
 
 
@@ -605,15 +599,15 @@ def _find_override_column(name: str, columns: list[str], key: str) -> str:
     if len(matches) == 1:
         return matches[0]
     raise SchemaError(
-        f"column_overrides sets '{key}' to the column '{name}', but no column with that name is "
+        f"The setting '{key}' names the column '{name}', but no column with that name is "
         f"in the file. Columns in the file: {', '.join(columns)}"
     )
 
 
 def _parse_token_column(
-    column: str, aliases: Aliases, software: str | None, allow_cap: bool
+    column: str, aliases: Aliases, software: str | None
 ) -> tuple[_Parsed | None, str]:
-    """Split a column name into element, method, unit, cap and detail words."""
+    """Split a column name into element, method, unit and detail words."""
     tokens = tokenize(normalize_name(column))
     lookup = aliases.element_lookup
     el_idx = [i for i, t in enumerate(tokens) if t in lookup]
@@ -650,23 +644,14 @@ def _parse_token_column(
             unit, unit_idx = unit_lookup[tokens[hits[0]]], hits
     drop.update(unit_idx)
 
-    capped = False
-    if allow_cap:
-        cap_idx = [
-            j for j in range(len(tokens)) if j not in drop and tokens[j] in aliases.cap_tokens
-        ]
-        if cap_idx:
-            capped = True
-            drop.update(cap_idx)
-
     rest = [tokens[j] for j in range(len(tokens)) if j not in drop]
     if not rest:
-        return _Parsed(column, element, estimator, unit, capped, None), ""
+        return _Parsed(column, element, estimator, unit, None), ""
     meta_lookup = aliases.metadata_lookup(software, standalone=False)
     for start in range(len(rest)):
         candidate = "_".join(rest[start:])
         if candidate in meta_lookup:
-            return _Parsed(column, element, estimator, unit, capped, meta_lookup[candidate]), ""
+            return _Parsed(column, element, estimator, unit, meta_lookup[candidate]), ""
     return None, f"unrecognised words '{'_'.join(rest)}' after the element name"
 
 
@@ -716,7 +701,7 @@ def resolve(
     global_over: dict[str, str] = {}
     el_over: dict[str, dict[str, str]] = {}
     for key, col_name in cfg.column_overrides.items():
-        col = _find_override_column(col_name, columns, key)
+        col = _find_override_column(col_name, columns, f"column_overrides > {key}")
         if key in structural_keys:
             struct_over[key] = col
         elif key in meta_keys:
@@ -729,6 +714,17 @@ def resolve(
             el_over.setdefault(el, {})[part] = col
         else:
             raise SchemaError(_bad_override_message(key, structural_keys, meta_keys))
+        used.add(col)
+    for el, el_cfg in cfg.elements.items():  # elements: <el>: column: (same as <el>.primary)
+        if el_cfg.column is None:
+            continue
+        if el not in element_syms:
+            raise SchemaError(
+                f"elements > {el}: '{el}' is not a recognised element symbol. Known: "
+                f"{', '.join(sorted(element_syms))}"
+            )
+        col = _find_override_column(el_cfg.column, columns, f"elements > {el} > column")
+        el_over.setdefault(el, {})["primary"] = col
         used.add(col)
 
     # --- structural columns ------------------------------------------------------------------
@@ -787,7 +783,7 @@ def resolve(
     for col in columns:
         if col in used:
             continue
-        parsed, reason = _parse_token_column(col, aliases, software, allow_cap=False)
+        parsed, reason = _parse_token_column(col, aliases, software)
         if parsed is not None:
             parsed_cols.append(parsed)
             continue
@@ -971,18 +967,21 @@ def _assemble_element(
         metadata[meta] = cands[0].column
         log.append({"standard": f"{el}.{meta}", "column": cands[0].column, "method": "token"})
 
-    # units
-    el_cfg = cfg.elements.items.get(el)
-    canonical = el_cfg.canonical_unit if el_cfg else aliases.canonical_units.get(el, "pct")
+    # units: the settings unit wins, then the unit in the column name, then the default unit
+    # for the element (pct for base metals; g/t, or oz/ton in imperial projects, for precious
+    # metals). Ceiling and cutoff are written in the settings unit, or the default unit.
+    el_cfg = cfg.elements.get(el)
+    canonical = aliases.canonical_units.get(el, "pct")
+    default = units.default_unit(canonical, cfg.units)
     if el_cfg is not None and el_cfg.unit != "auto":
-        unit, unit_source = el_cfg.unit, "config"
+        unit, unit_source, threshold_unit = el_cfg.unit, "config", el_cfg.unit
     elif primary_unit is not None:
-        unit, unit_source = primary_unit, "column_name"
+        unit, unit_source, threshold_unit = primary_unit, "column_name", default
     else:
-        unit, unit_source = canonical, "assumed"
+        unit, unit_source, threshold_unit = default, "assumed", default
         notes.append(
-            f"{name}: unit not given in the config or column name; assumed {canonical} "
-            "(the element's standard unit)."
+            f"{name}: unit not given in the settings or the column name; assumed {default} "
+            "(the default unit for this element)."
         )
 
     return ElementSchema(
@@ -992,6 +991,8 @@ def _assemble_element(
         unit=unit,
         unit_source=unit_source,
         canonical_unit=canonical,
+        threshold_unit=threshold_unit,
+        metal_unit=units.metal_unit(canonical, cfg.units),
         configured=el_cfg is not None,
         nn_col=nn_col,
         check_estimators=check,

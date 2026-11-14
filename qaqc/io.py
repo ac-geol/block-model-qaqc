@@ -25,7 +25,7 @@ Steps:
 
 Columns are renamed to standard names inside the table: structural columns keep their key
 (``x``, ``domain``, ``sg`` ...), each element's main estimate is the element symbol (``cu``),
-its nearest-neighbour benchmark is ``cu_nn`` and its estimation details are ``cu_nsamples`` and
+its estimation details are ``cu_nsamples`` and
 so on. Model-wide estimation details keep their key (``nsamples``). ``_ROW`` is the position of
 the row in the file (0 = first data row) and is used to export flags.
 """
@@ -91,8 +91,6 @@ def internal_columns(schema: ResolvedSchema) -> dict[str, str]:
     out: dict[str, str] = dict(schema.structural)
     for el, es in schema.elements.items():
         out[el] = es.primary
-        if es.nn_col:
-            out[f"{el}_nn"] = es.nn_col
         for meta, col in es.metadata.items():
             out[f"{el}_{meta}"] = col
     for meta, col in schema.global_metadata.items():

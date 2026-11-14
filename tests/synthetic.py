@@ -63,17 +63,15 @@ ELEMENT_DOMAINS = {"cu": MINERAL, "au": ("SUL",)}
 
 ELEMENT_CONFIG = {
     "cu": {
-        "canonical_unit": "pct",
         "unit": "auto",
         "ceiling": 34.6,
-        "diagnostic_cutoff": 0.5,
+        "cutoff": 0.5,
         "domains": "auto",
     },
     "au": {
-        "canonical_unit": "gpt",
         "unit": "auto",
         "ceiling": 500.0,
-        "diagnostic_cutoff": 0.5,
+        "cutoff": 0.5,
         "domains": "auto",
     },
 }
@@ -91,8 +89,8 @@ META = (
 
 CLASS_CODES = {
     "generic": {3: "MEAS", 2: "IND", 1: "INF", 0: "UNCLASS"},
-    "datamine": {3: "1", 2: "2", 1: "3", 0: "4"},
-    "isatis": {3: "1", 2: "2", 1: "3", 0: "4"},
+    "datamine": {3: "1", 2: "2", 1: "3", 0: "0"},
+    "isatis": {3: "1", 2: "2", 1: "3", 0: "0"},
     "leapfrog": {3: "Measured", 2: "Indicated", 1: "Inferred", 0: "Unclassified"},
 }
 UNMAPPED_CODE = "PROV"
@@ -326,14 +324,14 @@ class SyntheticModel:
     grid: dict[str, Any]
     header_lines: list[str] = field(default_factory=list)
 
-    def write(self, folder: str | Path) -> tuple[Path, Path]:
-        """Write ``block_model.csv`` and ``composites.csv`` into ``folder``."""
+    def write(self, folder: str | Path) -> Path:
+        """Write ``block_model.csv`` into ``folder`` (the composites are only used inside the
+        generator to make the block grades)."""
         folder = Path(folder)
         folder.mkdir(parents=True, exist_ok=True)
-        bm, comps = folder / "block_model.csv", folder / "composites.csv"
+        bm = folder / "block_model.csv"
         bm.write_text(self.csv, encoding="utf-8")
-        comps.write_text(self.composites_csv, encoding="utf-8")
-        return bm, comps
+        return bm
 
     def header_sample(self, n_rows: int = 5) -> str:
         """Header lines plus the first ``n_rows`` data rows (like a header fixture file)."""
@@ -359,7 +357,6 @@ class SyntheticModel:
             "source_software": "auto",
             "paths": {
                 "block_model_csv": "block_model.csv",
-                "composites_csv": "composites.csv",
                 "output_dir": "qaqc_outputs",
                 "cache_dir": ".qaqc_cache",
             },
@@ -1158,7 +1155,7 @@ def _expected(
     key_cols = ["xl", "yl", "zl"] + (["domain"] if kind == "percentage" else [])
     keys = g.loc[sel, key_cols].copy()
     for c in ("xl", "yl", "zl"):
-        keys[c] = np.round(keys[c].to_numpy() / tol.coord_snap_m).astype(np.int64)
+        keys[c] = np.round(keys[c].to_numpy() / tol.coord_snap).astype(np.int64)
     flags["FLAG_DUP_CENTROID"] = int(keys.duplicated(keep=False).sum())
     flags["FLAG_OFF_GRID"] = int((g["off_grid"].to_numpy() & sel).sum())
     out["flags_with_subblock_grid_check"] = {
@@ -1179,7 +1176,7 @@ def _expected(
         flags["FLAG_PCT_ANOMALY"] = int(((p < 0) | (p > 1) | (psum > 1 + tol.overfill_frac)).sum())
 
     # --- density -----------------------------------------------------------------------------
-    lo, hi = cfg.density.default_bounds
+    lo, hi = cfg.density_range
     sg = g["sg"].to_numpy()
     missing, low, high = inc & np.isnan(sg), inc & (sg < lo), inc & (sg > hi)
     out["sg_breakdown"] = {
@@ -1198,20 +1195,20 @@ def _expected(
         applicable = []
         for d in sorted(set(dom[inc & ~waste])):
             m = inc & (dom == d)
-            if np.mean(~np.isnan(v[m])) >= cfg.elements.min_estimated_fraction:
+            if np.mean(~np.isnan(v[m])) >= cfg.tolerances.min_estimated_fraction:
                 applicable.append(d)
         out["applicable_domains"][el] = applicable
         app = np.isin(dom, applicable)
         flags[f"FLAG_NEG_{tag}"] = int((inc & (v < 0)).sum())
         flags[f"FLAG_CEILING_{tag}"] = int((inc & (v > ec["ceiling"])).sum())
         flags[f"FLAG_UNEST_{tag}"] = int((inc & app & ~waste & np.isnan(v)).sum())
-        flags[f"FLAG_BLEED_{tag}"] = int((inc & waste & (v > ec["diagnostic_cutoff"])).sum())
+        flags[f"FLAG_BLEED_{tag}"] = int((inc & waste & (v > ec["cutoff"])).sum())
 
     # --- classification ----------------------------------------------------------------------
     rank = g["rank"].to_numpy()
     above = np.zeros(len(g), dtype=bool)
     for el, ec in ELEMENT_CONFIG.items():
-        above |= np.nan_to_num(g[el].to_numpy(), nan=-np.inf) >= ec["diagnostic_cutoff"]
+        above |= np.nan_to_num(g[el].to_numpy(), nan=-np.inf) >= ec["cutoff"]
     flags["FLAG_UNCLASS_MINERALIZED"] = int((inc & ~waste & (rank == 0) & above).sum())
     rank_map = cfg.classification.rank_map
     codes = g.loc[inc, "class_norm"].dropna()
@@ -1251,21 +1248,4 @@ def _expected(
     out["sentinel_replacements"] = sent
     out["coerced_values"] = junk
 
-    # --- composites --------------------------------------------------------------------------
-    outside = comps["true_domain"].isna().to_numpy()
-    mismatch = ~outside & (comps["true_domain"] != comps["label"]).to_numpy()
-    comp_out: dict[str, Any] = {
-        "COMP_OUTSIDE_MODEL": int(outside.sum()),
-        "COMP_DOMAIN_MISMATCH": int(mismatch.sum()),
-        "uncapped": not composites_capped,
-    }
-    for el in ELEMENT_CONFIG:
-        col = f"{el}_cap" if composites_capped else el
-        cmax = comps.groupby("label")[col].max()
-        limit = g["domain"].map(cmax).to_numpy(dtype=np.float64) * (1 + tol.above_comp_max_frac)
-        v = g[el].to_numpy()
-        flags[f"FLAG_ABOVE_COMP_MAX_{el.upper()}"] = int(
-            (inc & ~np.isnan(limit) & (v > limit)).sum()
-        )
-    out["composites"] = comp_out
     return out

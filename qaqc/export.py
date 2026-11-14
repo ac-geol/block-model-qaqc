@@ -3,8 +3,7 @@
 One entry point, :func:`write_outputs`, writes everything into ``paths.output_dir``:
 
 * ``flagged_blocks_leapfrog.csv``: blocks with at least one flag, as points for Leapfrog;
-* ``flagged_composites.csv``: composites with at least one flag (only if composite flags exist);
-* one ``<stem>.csv`` for every table in ``ctx.tables`` (for example ``composite_domain_mismatch``);
+* one ``<stem>.csv`` for every table a module put in ``ctx.tables``;
 * ``model_flags.parquet``: every block and every flag (only if ``export.full_model_flags``);
 * ``audit_bundle.json``: all results in one machine-readable file.
 
@@ -39,7 +38,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BLOCKS_CSV = "flagged_blocks_leapfrog.csv"
-COMPOSITES_CSV = "flagged_composites.csv"
 FULL_FLAGS = "model_flags.parquet"
 BUNDLE_JSON = "audit_bundle.json"
 SCHEMA_VERSION = 1
@@ -122,31 +120,16 @@ def flagged_blocks(ctx: AuditContext, only_flagged: bool = True) -> pd.DataFrame
                 col = bm[std].iloc[rows].astype(object).to_numpy()
             data[name] = col
     if "classif" in bm.columns:
-        data["CLASS_RANK"] = class_ranks(bm, ctx.cfg)[0][rows]
+        ranks = class_ranks(bm, ctx.cfg)[0][rows]
+        labels = ctx.cfg.classification.rank_labels
+        # CLASS_RANK: 3 Measured, 2 Indicated, 1 Inferred, 4 Exploration Target, 0 Unclassified
+        data["CLASS_RANK"] = ranks
+        data["CLASS"] = np.array([labels.get(int(r), str(r)) for r in ranks], dtype=object)
     for el, es in ctx.schema.elements.items():
         if el in bm.columns:
             data[es.primary] = bm[el].to_numpy()[rows]
     df = pd.DataFrame(data)
     return pd.concat([df, _flag_columns(ctx.flags, rows)], axis=1)
-
-
-def flagged_composites(ctx: AuditContext) -> pd.DataFrame | None:
-    """Table of flagged composites, or None if there are no composite flags."""
-    if ctx.comps is None or ctx.comp_flags is None:
-        return None
-    rows = np.flatnonzero(ctx.comp_flags.any())
-    comps = ctx.comps
-    data: dict[str, Any] = {}
-    if "_ROW" in comps.columns:
-        data["_ROW"] = comps["_ROW"].to_numpy()[rows]
-    else:
-        data["_ROW"] = rows
-    for std, name in _BLOCK_COLUMNS.items():
-        if std in comps.columns and std not in ("dx", "dy", "dz", "classif"):
-            col = comps[std].iloc[rows]
-            data[name] = col.astype(object).to_numpy() if std == "domain" else col.to_numpy()
-    df = pd.DataFrame(data)
-    return pd.concat([df, _flag_columns(ctx.comp_flags, rows)], axis=1)
 
 
 # --------------------------------------------------------------------------- bundle
@@ -191,12 +174,19 @@ def build_bundle(ctx: AuditContext, files: dict[str, Path]) -> dict[str, Any]:
     n_rows = len(ctx.bm)
     n_flagged = int(ctx.flags.any().sum())
     inputs = [{"role": role, **info} for role, info in raw.get("inputs", {}).items()]
-    comp_input = raw.get("composites", {}).get("input")
-    if comp_input:
-        inputs.append({"role": "composites", **comp_input})
     schema = raw.get("schema") or ctx.schema.to_bundle()
 
-    reserved = {"config", "schema", "inputs", "ingest", "timings", "grid", "flags", "metadata"}
+    reserved = {
+        "config",
+        "schema",
+        "inputs",
+        "ingest",
+        "timings",
+        "grid",
+        "flags",
+        "metadata",
+        "units",
+    }
     bundle: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "metadata": {
@@ -209,6 +199,7 @@ def build_bundle(ctx: AuditContext, files: dict[str, Path]) -> dict[str, Any]:
             "source_software_detected": schema.get("software_detected"),
             "inputs": inputs,
             "timings_s": raw.get("timings", {}),
+            "units": raw.get("units", {}),
         },
         "schema": schema,
         "grid": raw.get("grid", {}),
@@ -224,9 +215,6 @@ def build_bundle(ctx: AuditContext, files: dict[str, Path]) -> dict[str, Any]:
         "pct_flagged": round(100.0 * n_flagged / n_rows, 6) if n_rows else 0.0,
         "exports": {name: str(path) for name, path in files.items()},
     }
-    if ctx.comp_flags is not None:
-        flags["composite_catalog"] = flag_catalog(ctx.comp_flags, template, ctx.comp_flags.n_rows)
-        flags["composites_flagged"] = int(ctx.comp_flags.any().sum())
     bundle["flags"] = flags
     return jsonable(bundle)
 
@@ -261,12 +249,6 @@ def write_outputs(ctx: AuditContext, report_path: str | Path | None = None) -> d
         path = out_dir / BLOCKS_CSV
         _write_csv(path, flagged_blocks(ctx))
         files[BLOCKS_CSV] = path
-
-        comp = flagged_composites(ctx)
-        if comp is not None:
-            path = out_dir / COMPOSITES_CSV
-            _write_csv(path, comp)
-            files[COMPOSITES_CSV] = path
 
         for stem, table in ctx.tables.items():
             path = out_dir / f"{stem}.csv"

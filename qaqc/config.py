@@ -19,7 +19,6 @@ from pydantic import (
     Field,
     ValidationError,
     field_validator,
-    model_serializer,
     model_validator,
 )
 
@@ -70,7 +69,6 @@ class _Strict(BaseModel):
 
 class PathsConfig(_Strict):
     block_model_csv: Path
-    composites_csv: Path | None = None
     output_dir: Path = Path("qaqc_outputs")
     cache_dir: Path = Path(".qaqc_cache")
     extra_aliases: Path | None = None  # optional YAML that extends the built-in alias tables
@@ -141,56 +139,84 @@ class DomainsConfig(_Strict):
         return [c for c in (normalize_code(x) for x in v) if c is not None]
 
 
-_DEFAULT_RANK_MAP = {
-    "1": 3,
-    "MEAS": 3,
-    "MEASURED": 3,
-    "2": 2,
-    "IND": 2,
-    "INDICATED": 2,
-    "3": 1,
-    "INF": 1,
-    "INFERRED": 1,
-    "0": 0,
-    "4": 0,
-    "99": 0,
-    "UNCLASS": 0,
-    "UNCLASSIFIED": 0,
-    "NONE": 0,
-}
-
-
 class ClassificationConfig(_Strict):
-    rank_map: dict[str, int] = Field(default_factory=lambda: dict(_DEFAULT_RANK_MAP))
-    rank_labels: dict[int, str] = Field(
-        default_factory=lambda: {3: "Measured", 2: "Indicated", 1: "Inferred", 0: "Unclassified"}
+    """Which classification codes in the file mean Measured, Indicated, Inferred, Exploration
+    Target or Unclassified. Codes are compared after tidying (stripped, uppercase, ``1.0`` ->
+    ``"1"``)."""
+
+    measured: list[str] = Field(default_factory=lambda: ["1", "MEAS", "MEASURED"])
+    indicated: list[str] = Field(default_factory=lambda: ["2", "IND", "INDICATED"])
+    inferred: list[str] = Field(default_factory=lambda: ["3", "INF", "INFERRED"])
+    exploration_target: list[str] = Field(
+        default_factory=lambda: ["4", "ET", "EXPLORATION TARGET", "EXPLORATION_TARGET"]
+    )
+    unclassified: list[str] = Field(
+        default_factory=lambda: ["0", "99", "UNCLASS", "UNCLASSIFIED", "NONE"]
     )
 
-    @field_validator("rank_map", mode="before")
+    @field_validator(
+        "measured", "indicated", "inferred", "exploration_target", "unclassified", mode="before"
+    )
     @classmethod
-    def _norm_rank_map(cls, v: dict[Any, Any]) -> dict[str, int]:
+    def _norm_codes(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            v = [v]
+        return [c for c in (normalize_code(x) for x in v) if c is not None]
+
+    @model_validator(mode="after")
+    def _no_code_twice(self) -> ClassificationConfig:
+        seen: dict[str, str] = {}
+        for name in CLASS_FIELDS.values():
+            for code in getattr(self, name):
+                if code in seen and seen[code] != name:
+                    raise ValueError(f"code '{code}' is listed under both {seen[code]} and {name}")
+                seen[code] = name
+        return self
+
+    @property
+    def rank_map(self) -> dict[str, int]:
+        """Code -> class number (3 Measured, 2 Indicated, 1 Inferred, 4 Exploration Target,
+        0 Unclassified)."""
         out: dict[str, int] = {}
-        for code, rank in v.items():
-            key = normalize_code(code)
-            if key is None:
-                raise ValueError("rank_map contains an empty classification code")
-            out[key] = rank
+        for rank, name in CLASS_FIELDS.items():
+            for code in getattr(self, name):
+                out[code] = rank
         return out
 
-    @field_validator("rank_map")
-    @classmethod
-    def _rank_range(cls, v: dict[str, int]) -> dict[str, int]:
-        bad = {k: r for k, r in v.items() if r not in (0, 1, 2, 3)}
-        if bad:
-            raise ValueError(f"ranks must be 0, 1, 2 or 3; got {bad}")
-        return v
+    @property
+    def rank_labels(self) -> dict[int, str]:
+        return dict(RANK_LABELS)
+
+
+# Class number -> name. Exploration Target is number 4 so the numbers of the other classes stay
+# as they were; it is shown after Inferred (CLASS_ORDER). It is not a resource class.
+RANK_LABELS = {
+    3: "Measured",
+    2: "Indicated",
+    1: "Inferred",
+    4: "Exploration Target",
+    0: "Unclassified",
+}
+CLASS_FIELDS = {
+    3: "measured",
+    2: "indicated",
+    1: "inferred",
+    4: "exploration_target",
+    0: "unclassified",
+}
+CLASS_ORDER = (3, 2, 1, 4, 0)  # order classes are shown in
+RESOURCE_RANKS = (3, 2, 1)  # classes that make up the resource total
 
 
 class ElementConfig(_Strict):
-    canonical_unit: Literal["pct", "gpt"]
-    unit: Literal["auto", "pct", "ppm", "ppb", "gpt"] = "auto"
+    """Settings for one element. ``ceiling`` and ``cutoff`` are in the element's unit."""
+
+    column: str | None = None  # grade column in the file; None = found from the column names
+    unit: Literal["auto", "pct", "ppm", "ppb", "gpt", "opt"] = "auto"
     ceiling: float | None = None
-    diagnostic_cutoff: float | None = None
+    cutoff: float | None = None
     domains: Literal["auto"] | list[str] = "auto"
 
     @field_validator("domains", mode="before")
@@ -201,65 +227,34 @@ class ElementConfig(_Strict):
         return v
 
 
-class ElementsConfig(_Strict):
-    """Element settings. In YAML this is one mapping holding the element entries plus the
-    ``min_estimated_fraction`` setting side by side."""
-
-    min_estimated_fraction: float = 0.01
-    items: dict[str, ElementConfig] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _split(cls, data: Any) -> Any:
-        if not isinstance(data, dict) or "items" in data:
-            return data
-        data = dict(data)
-        out: dict[str, Any] = {}
-        if "min_estimated_fraction" in data:
-            out["min_estimated_fraction"] = data.pop("min_estimated_fraction")
-        out["items"] = {str(k).strip().lower(): v for k, v in data.items()}
-        return out
-
-    @field_validator("min_estimated_fraction")
-    @classmethod
-    def _fraction(cls, v: float) -> float:
-        if not 0 <= v <= 1:
-            raise ValueError("min_estimated_fraction must be between 0 and 1")
-        return v
-
-    @model_serializer(mode="wrap")
-    def _flatten(self, handler: Any) -> dict[str, Any]:
-        dumped = handler(self)
-        out = dict(dumped["items"])
-        out["min_estimated_fraction"] = dumped["min_estimated_fraction"]
-        return out
-
-
 Bounds = tuple[float, float]
+
+# Density limits used when density: range is not set (t/m3 = specific gravity, short tons/ft3).
+DEFAULT_DENSITY_RANGE: dict[str, Bounds] = {"metric": (1.5, 5.5), "imperial": (0.045, 0.175)}
 
 
 def _check_bounds(b: Bounds) -> Bounds:
     if b[0] >= b[1]:
-        raise ValueError(f"lower bound must be below upper bound; got {list(b)}")
+        raise ValueError(f"lower limit must be below upper limit; got {list(b)}")
     return b
 
 
 class DensityConfig(_Strict):
-    default_bounds: Bounds = (1.5, 5.5)
-    domain_bounds: dict[str, Bounds] = Field(default_factory=dict)
+    range: Bounds | None = None  # None = the default for the project's units
+    domain_ranges: dict[str, Bounds] = Field(default_factory=dict)
     check_waste: bool = True
 
-    @field_validator("default_bounds")
+    @field_validator("range")
     @classmethod
-    def _default_ok(cls, v: Bounds) -> Bounds:
-        return _check_bounds(v)
+    def _range_ok(cls, v: Bounds | None) -> Bounds | None:
+        return None if v is None else _check_bounds(v)
 
-    @field_validator("domain_bounds", mode="before")
+    @field_validator("domain_ranges", mode="before")
     @classmethod
-    def _norm_domain_keys(cls, v: dict[Any, Any]) -> dict[str, Any]:
-        return {normalize_code(k): b for k, b in v.items()}
+    def _norm_domain_keys(cls, v: Any) -> dict[str, Any]:
+        return {} if v is None else {normalize_code(k): b for k, b in v.items()}
 
-    @field_validator("domain_bounds")
+    @field_validator("domain_ranges")
     @classmethod
     def _domain_ok(cls, v: dict[str, Bounds]) -> dict[str, Bounds]:
         for b in v.values():
@@ -276,47 +271,23 @@ class SupportThresholds(_Strict):
 
 
 class SupportConfig(_Strict):
+    """Classification criteria checked against the estimation details in the model."""
+
     element: str = "auto"
-    thresholds_by_rank: dict[int, SupportThresholds] = Field(
-        default_factory=lambda: {
-            3: SupportThresholds(
-                nholes_min=3, nsamples_min=8, slope_reg_min=0.80, kriging_eff_min=0.50, max_pass=1
-            ),
-            2: SupportThresholds(
-                nholes_min=2, nsamples_min=4, slope_reg_min=0.50, kriging_eff_min=0.30, max_pass=2
-            ),
-        }
+    measured: SupportThresholds = Field(
+        default_factory=lambda: SupportThresholds(
+            nholes_min=3, nsamples_min=8, slope_reg_min=0.80, kriging_eff_min=0.50, max_pass=1
+        )
+    )
+    indicated: SupportThresholds = Field(
+        default_factory=lambda: SupportThresholds(
+            nholes_min=2, nsamples_min=4, slope_reg_min=0.50, kriging_eff_min=0.30, max_pass=2
+        )
     )
 
-    @field_validator("thresholds_by_rank")
-    @classmethod
-    def _ranks(cls, v: dict[int, SupportThresholds]) -> dict[int, SupportThresholds]:
-        bad = [r for r in v if r not in (1, 2, 3)]
-        if bad:
-            raise ValueError(f"thresholds_by_rank keys must be 1, 2 or 3; got {bad}")
-        return v
-
-
-class CompositesConfig(_Strict):
-    capped_columns: dict[str, str] = Field(default_factory=dict)
-    caps: dict[str, dict[str, float]] = Field(default_factory=dict)
-    length_column: str = "auto"
-    bias_warn_pct: float = 5.0
-    bias_fail_pct: float = 10.0
-
-    @field_validator("caps", mode="before")
-    @classmethod
-    def _norm_caps(cls, v: dict[str, dict[Any, float]]) -> dict[str, dict[str, float]]:
-        return {
-            str(el).lower(): {normalize_code(d): cap for d, cap in by_dom.items()}
-            for el, by_dom in v.items()
-        }
-
-    @model_validator(mode="after")
-    def _bias_order(self) -> CompositesConfig:
-        if self.bias_warn_pct > self.bias_fail_pct:
-            raise ValueError("bias_warn_pct must not be larger than bias_fail_pct")
-        return self
+    @property
+    def thresholds_by_rank(self) -> dict[int, SupportThresholds]:
+        return {3: self.measured, 2: self.indicated}
 
 
 class ResourceCutoff(_Strict):
@@ -327,26 +298,13 @@ class ResourceCutoff(_Strict):
 class ReportingConfig(_Strict):
     resource_cutoff: ResourceCutoff | None = None
     include_waste_in_statement: bool = False
-    gt_curve_steps: int = Field(default=25, ge=2)
-
-
-class SwathConfig(_Strict):
-    bin_multipliers: Triple = (2, 2, 1)
-    min_bin_tonnage_pct: float = 0.5
-
-    @field_validator("bin_multipliers")
-    @classmethod
-    def _positive(cls, v: Triple) -> Triple:
-        if any(m <= 0 for m in v):
-            raise ValueError("bin_multipliers must all be greater than zero")
-        return v
 
 
 class TolerancesConfig(_Strict):
-    coord_snap_m: float = Field(default=0.001, gt=0)
+    coord_snap: float = Field(default=0.001, gt=0)  # in the model's length unit (m or ft)
     overfill_frac: float = Field(default=0.001, ge=0)
     subblock_grade_std: float = Field(default=1.0e-4, ge=0)
-    above_comp_max_frac: float = Field(default=0.001, ge=0)
+    min_estimated_fraction: float = Field(default=0.01, ge=0, le=1)
 
 
 class ReportConfig(_Strict):
@@ -370,6 +328,7 @@ class ProjectConfig(_Strict):
     """The validated project configuration."""
 
     project_name: str
+    units: Literal["metric", "imperial"] = "metric"
     source_software: Literal["auto", "datamine", "isatis", "leapfrog"] = "auto"
     paths: PathsConfig
     column_overrides: dict[str, str] = Field(default_factory=dict)
@@ -377,12 +336,10 @@ class ProjectConfig(_Strict):
     sentinels: SentinelsConfig = Field(default_factory=SentinelsConfig)
     domains: DomainsConfig = Field(default_factory=DomainsConfig)
     classification: ClassificationConfig = Field(default_factory=ClassificationConfig)
-    elements: ElementsConfig = Field(default_factory=ElementsConfig)
+    elements: dict[str, ElementConfig] = Field(default_factory=dict)
     density: DensityConfig = Field(default_factory=DensityConfig)
     support: SupportConfig = Field(default_factory=SupportConfig)
-    composites: CompositesConfig = Field(default_factory=CompositesConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
-    swath: SwathConfig = Field(default_factory=SwathConfig)
     target_wireframe_volumes: dict[str, float] = Field(default_factory=dict)
     tolerances: TolerancesConfig = Field(default_factory=TolerancesConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
@@ -392,6 +349,15 @@ class ProjectConfig(_Strict):
     @classmethod
     def _none_is_empty(cls, v: Any) -> Any:
         return {} if v is None else v
+
+    @field_validator("elements", mode="before")
+    @classmethod
+    def _element_keys(cls, v: Any) -> Any:
+        if v is None:
+            return {}
+        if isinstance(v, dict):
+            return {str(k).strip().lower(): ({} if e is None else e) for k, e in v.items()}
+        return v
 
     @field_validator("target_wireframe_volumes", mode="before")
     @classmethod
@@ -403,7 +369,7 @@ class ProjectConfig(_Strict):
     @model_validator(mode="after")
     def _cross_checks(self) -> ProjectConfig:
         cutoff = self.reporting.resource_cutoff
-        if cutoff is not None and cutoff.element.lower() not in self.elements.items:
+        if cutoff is not None and cutoff.element.lower() not in self.elements:
             raise ValueError(
                 f"reporting.resource_cutoff uses element '{cutoff.element}', which is not listed "
                 "under 'elements'"
@@ -421,7 +387,6 @@ class ProjectConfig(_Strict):
         new_paths = self.paths.model_copy(
             update={
                 "block_model_csv": fix(self.paths.block_model_csv),
-                "composites_csv": fix(self.paths.composites_csv),
                 "output_dir": fix(self.paths.output_dir),
                 "cache_dir": fix(self.paths.cache_dir),
                 "extra_aliases": fix(self.paths.extra_aliases),
@@ -429,9 +394,65 @@ class ProjectConfig(_Strict):
         )
         return self.model_copy(update={"paths": new_paths})
 
+    @property
+    def density_range(self) -> Bounds:
+        """Allowed density range: ``density.range``, or the default for the project's units."""
+        return self.density.range or DEFAULT_DENSITY_RANGE[self.units]
+
     def snapshot(self) -> dict[str, Any]:
         """JSON-serializable copy of the configuration (for the audit bundle)."""
         return self.model_dump(mode="json")
+
+
+_REMOVED_COMPOSITES = "removed: composite checks are no longer part of this tool; delete it"
+
+# old setting path -> what to do instead (settings changed in November 2026)
+OLD_SETTINGS: dict[tuple[str, ...], str] = {
+    ("composites",): _REMOVED_COMPOSITES,
+    ("swath",): _REMOVED_COMPOSITES,
+    ("paths", "composites_csv"): _REMOVED_COMPOSITES,
+    ("reporting", "gt_curve_steps"): "removed (grade-tonnage curves were dropped); delete it",
+    ("tolerances", "above_comp_max_frac"): _REMOVED_COMPOSITES,
+    ("tolerances", "coord_snap_m"): "renamed to tolerances: coord_snap",
+    ("classification", "rank_map"): (
+        "replaced by lists of codes: classification: measured, indicated, inferred, unclassified"
+    ),
+    ("classification", "rank_labels"): "removed (the class names are fixed); delete it",
+    ("density", "default_bounds"): "renamed to density: range",
+    ("density", "domain_bounds"): "renamed to density: domain_ranges",
+    ("support", "thresholds_by_rank"): (
+        "replaced by support: measured and support: indicated (same limits inside)"
+    ),
+    ("elements", "min_estimated_fraction"): "moved to tolerances: min_estimated_fraction",
+}
+OLD_ELEMENT_SETTINGS = {
+    "canonical_unit": "removed: set unit instead (pct, ppm, ppb, gpt or opt)",
+    "diagnostic_cutoff": "renamed to cutoff",
+}
+
+
+def old_setting_messages(data: Any) -> list[str]:
+    """Plain messages for settings that were renamed or removed, so old files are easy to fix."""
+    if not isinstance(data, dict):
+        return []
+    out = []
+    for path, text in OLD_SETTINGS.items():
+        node: Any = data
+        for key in path:
+            node = node.get(key, _MISSING) if isinstance(node, dict) else _MISSING
+        if node is not _MISSING:
+            out.append(f"{' > '.join(path)}: {text}")
+    elements = data.get("elements")
+    if isinstance(elements, dict):
+        for el, settings in elements.items():
+            if isinstance(settings, dict):
+                for key, text in OLD_ELEMENT_SETTINGS.items():
+                    if key in settings:
+                        out.append(f"elements > {el} > {key}: {text}")
+    return out
+
+
+_MISSING = object()
 
 
 def _format_errors(err: ValidationError) -> str:
@@ -457,6 +478,12 @@ def from_dict(data: dict[str, Any], base_dir: Path | None = None) -> ProjectConf
     Raises:
         ConfigError: If any value is missing, unknown or invalid.
     """
+    old = old_setting_messages(data)
+    if old:
+        raise ConfigError(
+            "The project configuration uses settings that have been renamed or removed:\n"
+            + "\n".join(f"  - {m}" for m in old)
+        )
     try:
         cfg = ProjectConfig.model_validate(data)
     except ValidationError as err:

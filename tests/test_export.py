@@ -34,7 +34,15 @@ def test_flagged_csv(ctx):
     assert len(df) == int(mask.sum())
     assert df["_ROW"].tolist() == ctx.bm["_ROW"].to_numpy()[mask].tolist()
     assert {"X", "Y", "Z", "DOMAIN", "CLASS_RANK", "FLAG_COUNT", "FLAG_REASONS"} <= set(df.columns)
-    assert set(df["CLASS_RANK"]) <= {0, 1, 2, 3}
+    assert set(df["CLASS_RANK"]) <= {0, 1, 2, 3, 4}
+    names = {
+        0: "Unclassified",
+        1: "Inferred",
+        2: "Indicated",
+        3: "Measured",
+        4: "Exploration Target",
+    }
+    assert (df["CLASS"] == df["CLASS_RANK"].map(names)).all()
     np.testing.assert_allclose(df["X"], ctx.bm["x"].to_numpy()[mask])
     for name, n in ctx.flags.counts().items():
         if n:
@@ -85,7 +93,7 @@ def test_bundle_strict_json(ctx):
     assert b["geometry"]["nan_probe"] is None
     for key in ("metadata", "schema", "grid", "warnings", "ingestion", "geometry", "density"):
         assert key in b
-    for key in ("grades", "classification", "support", "composites"):
+    for key in ("grades", "classification", "support"):
         assert key not in b  # modules not run
     md = b["metadata"]
     assert md["project_name"] == ctx.cfg.project_name

@@ -1,4 +1,4 @@
-# Column-name alias tables used to recognise block model and composite columns.
+# Column-name alias tables used to recognise block model columns.
 #
 # All names here are written in their "normalized" form: lowercase, with any run of spaces or
 # punctuation replaced by a single underscore (a "%" is kept). For example "OK Cu: NS" is
@@ -62,28 +62,6 @@ structural:
 
 required_structural: [x, y, z, domain]
 
-# --- Composite structural columns -------------------------------------------------------------
-composite_structural:
-  x:
-    generic: [x, xc, x_c, xcentre, xcenter, x_centre, x_center, east, easting, xm, x_mid, mid_x, xmid]
-  y:
-    generic: [y, yc, y_c, ycentre, ycenter, y_centre, y_center, north, northing, ym, y_mid, mid_y, ymid]
-  z:
-    generic: [z, zc, z_c, zcentre, zcenter, z_centre, z_center, elev, elevation, rl, zm, z_mid, mid_z, zmid]
-  domain:
-    generic: [domain, dom, zone, minzone, geodomain, estdom, est_domain, domain_code, domcode]
-    datamine: [kzone]                         # verify
-  length:
-    generic: [length, len, comp_length, sample_length]
-  from_depth:
-    generic: [from, from_m, depth_from, mfrom]
-  to_depth:
-    generic: [to, to_m, depth_to, mto]
-  hole_id:
-    generic: [holeid, hole_id, bhid, dhid, hole]
-
-composite_required_structural: [x, y, z, domain]
-
 # --- Elements (token match) ----------------------------------------------------------------------
 # element symbol -> names that mean that element when they appear as a whole word in a column name
 elements:
@@ -99,7 +77,9 @@ elements:
   pd: [pd, palladium]
   pt: [pt, platinum]
 
-# canonical unit used when an element is found in the file but not listed in the project config
+# kind of element: pct = base metal (metal reported in tonnes or short tons), gpt = precious
+# metal (metal reported in troy ounces). Also the default unit in metric projects; imperial
+# projects use opt (troy ounces per short ton) for precious metals.
 canonical_units:
   cu: pct
   ni: pct
@@ -119,15 +99,14 @@ estimator_tokens: [ok, sk, uk, ck, cok, ik, mik, uc, idw, id, id2, id3, ids, nn,
 # estimation methods that give a nearest-neighbour style benchmark rather than an estimate
 nn_estimators: [nn, pnn, poly]
 
-# unit words -> unit. "g_t" is matched as the two words g and t next to each other.
+# unit words -> unit. Two-word units ("g_t" from g/t, "oz_t" from oz/t) are matched as two
+# words next to each other.
 unit_tokens:
   pct: [pct, "%", percent]
   ppm: [ppm]
   ppb: [ppb]
   gpt: [gpt, gt, g_t]
-
-# words that mark a capped (top-cut) composite grade
-cap_tokens: [cap, capped, tc, topcut, cut]
+  opt: [opt, ozt, ozpt, oz_t, oz_ton, ozton]
 
 # --- Estimation details ("metadata") ---------------------------------------------------------------
 # aliases: names matched after the element and method words are removed

@@ -1,9 +1,10 @@
 """Classification checks (spec 7.5).
 
-1. Class codes are mapped to ranks (3 Measured ... 0 Unclassified); unlisted codes are reported.
+1. Class codes are mapped to classes (Measured, Indicated, Inferred, Exploration Target,
+   Unclassified); unlisted codes are reported.
 2. Inventory of domain x class: volume, tonnes, share of the domain, weighted grades, metal.
 3. ``FLAG_UNCLASS_MINERALIZED``: unclassified, non-waste blocks with a grade at or above an
-   element's diagnostic cutoff (DECISIONS.md 8).
+   element's cutoff (DECISIONS.md 8).
 4. Resource statement reproduction when ``reporting.resource_cutoff`` is set.
 
 Air blocks are left out of everything here. Averages are weighted by tonnes (or volume when the
@@ -17,9 +18,10 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import numpy as np
 import pandas as pd
 
+from qaqc.config import CLASS_ORDER, RESOURCE_RANKS
 from qaqc.context import jsonable
 from qaqc.domains import class_ranks, domain_labels, waste_mask, weights
-from qaqc.units import contained_metal, convert, element_threshold, factor, metal_unit
+from qaqc.units import contained_metal, convert, element_threshold, measure_units
 
 if TYPE_CHECKING:
     from qaqc.context import AuditContext
@@ -28,7 +30,7 @@ MODULE = "classification"
 
 FLAG_TEXT = {
     "FLAG_UNCLASS_MINERALIZED": (
-        "Unclassified block in a mineralized domain with a grade at or above the diagnostic cutoff"
+        "Unclassified block in a mineralized domain with a grade at or above the cutoff"
     ),
 }
 
@@ -39,7 +41,8 @@ class El(NamedTuple):
     name: str
     grade: np.ndarray
     unit: str
-    canonical: str
+    canonical: str  # kind of element: pct = base metal, gpt = precious metal
+    tonnes_per_unit: float = 1.0  # metric tonnes per tonnage unit (short tons: 0.907)
 
 
 def factorize(values: np.ndarray) -> tuple[np.ndarray, list[Any]]:
@@ -72,7 +75,7 @@ def aggregate(
         "grade": {},
         "metal": {},
     }
-    for name, grade, unit, canon in elements:
+    for name, grade, unit, canon, t_per_unit in elements:
         g = grade[sel]
         ok = np.isfinite(g) & np.isfinite(ws) & (ws > 0)
         wsum = np.bincount(k[ok], weights=ws[ok], minlength=n_keys)
@@ -80,7 +83,7 @@ def aggregate(
         with np.errstate(invalid="ignore", divide="ignore"):
             out["grade"][name] = np.where(wsum > 0, wg / wsum, np.nan)
         if with_metal:
-            m = np.nan_to_num(contained_metal(t, g * factor(unit, canon), canon))
+            m = np.nan_to_num(contained_metal(t, g, unit, canon, t_per_unit))
             out["metal"][name] = np.bincount(k, weights=m, minlength=n_keys)
     return out
 
@@ -124,7 +127,7 @@ def _statement(
             f"Resource statement skipped: no grade column was found for '{cutoff.element}'.",
         )
         return {"skipped": f"no grade column for {cutoff.element}"}
-    value = convert(cutoff.value, es.canonical_unit, es.unit)
+    value = convert(cutoff.value, es.threshold_unit, es.unit)
     grade = ctx.bm[el].to_numpy(dtype=np.float64)
     include_waste = ctx.cfg.reporting.include_waste_in_statement
     used = rows & np.isfinite(grade)
@@ -137,8 +140,8 @@ def _statement(
     labels = ctx.cfg.classification.rank_labels
     result: dict[str, Any] = {
         "element": el,
-        "cutoff_canonical": float(cutoff.value),
-        "canonical_unit": es.canonical_unit,
+        "cutoff_value": float(cutoff.value),
+        "cutoff_unit": es.threshold_unit,
         "cutoff_in_column_unit": value,
         "column_unit": es.unit,
         "rule": "grade >= cutoff",
@@ -149,10 +152,10 @@ def _statement(
     if not used.any():
         result["total"] = None
         return result
-    sub = [El(e.name, e.grade[used], e.unit, e.canonical) for e in elements]
+    sub = [e._replace(grade=e.grade[used]) for e in elements]
     key = d_codes * n_r + ranks[used].astype(np.int64)
     agg = aggregate(key, n_d * n_r, vol[used], tonnes[used], w[used], sub, has_tonnes)
-    for i in np.flatnonzero(agg["blocks"]):
+    for i in _class_ordered(np.flatnonzero(agg["blocks"]), n_r):
         di, r = divmod(int(i), n_r)
         grades, metal = _grades_and_metal(agg, i, sub)
         result["rows"].append(
@@ -161,13 +164,13 @@ def _statement(
                 "rank": r,
                 "class": labels.get(r, str(r)),
                 "blocks": int(agg["blocks"][i]),
-                "volume_m3": float(agg["volume"][i]),
+                "volume": float(agg["volume"][i]),
                 "tonnes": _tonnes_or_none(agg, i, has_tonnes),
                 "grade": grades,
                 "metal": metal,
             }
         )
-    for r in range(n_r):
+    for r in CLASS_ORDER:
         sel = used & (ranks == r)
         if sel.any():
             result["by_class"].append(
@@ -181,8 +184,20 @@ def _statement(
                     {"rank": r, "class": labels.get(r, str(r))},
                 )
             )
-    result["total"] = _total_row(used, vol, tonnes, w, elements, has_tonnes, {})
+    # The total is the resource: Measured + Indicated + Inferred. Exploration Target and
+    # Unclassified blocks are listed by class above but left out of the total.
+    resource = used & np.isin(ranks, RESOURCE_RANKS)
+    result["total"] = (
+        _total_row(resource, vol, tonnes, w, elements, has_tonnes, {}) if resource.any() else None
+    )
+    result["total_classes"] = [labels[r] for r in RESOURCE_RANKS]
     return result
+
+
+def _class_ordered(keys: np.ndarray, n_r: int) -> list[int]:
+    """Group keys (domain * n_r + class) sorted by domain, then in the class display order."""
+    pos = {r: i for i, r in enumerate(CLASS_ORDER)}
+    return sorted((int(k) for k in keys), key=lambda k: (k // n_r, pos.get(k % n_r, 99)))
 
 
 def _total_row(
@@ -194,7 +209,7 @@ def _total_row(
     has_tonnes: bool,
     extra: dict[str, Any],
 ) -> dict[str, Any]:
-    sub = [El(e.name, e.grade[sel], e.unit, e.canonical) for e in elements]
+    sub = [e._replace(grade=e.grade[sel]) for e in elements]
     agg = aggregate(
         np.zeros(int(sel.sum()), dtype=np.int64), 1, vol[sel], tonnes[sel], w[sel], sub, has_tonnes
     )
@@ -202,7 +217,7 @@ def _total_row(
     return {
         **extra,
         "blocks": int(agg["blocks"][0]),
-        "volume_m3": float(agg["volume"][0]),
+        "volume": float(agg["volume"][0]),
         "tonnes": _tonnes_or_none(agg, 0, has_tonnes),
         "grade": grades,
         "metal": metal,
@@ -242,12 +257,12 @@ def run(ctx: AuditContext) -> None:
                 m = rows & (codes == code)
                 t = float(np.nansum(tonnes[m])) if has_tonnes else None
                 unmapped_rows.append({"code": code, "blocks": int(n), "tonnes": t})
-                extra = f" ({t:,.0f} t)" if t is not None else ""
+                extra = f" ({t:,.0f} {measure_units(cfg).tonnage})" if t is not None else ""
                 ctx.warn(
                     "warning",
                     MODULE,
-                    f"Class code '{code}' is not in the rank map: {n:,} block(s){extra} treated "
-                    "as unclassified.",
+                    f"Class code '{code}' is not listed under classification in the settings "
+                    f"file: {n:,} block(s){extra} counted as unclassified.",
                 )
         result["unmapped_codes"] = unmapped_rows
         result["rank_labels"] = {str(k): v for k, v in labels.items()}
@@ -255,12 +270,17 @@ def run(ctx: AuditContext) -> None:
         result["blocks_without_class"] = int((rows & bm["classif"].isna().to_numpy()).sum())
 
         elements = [
-            El(el, bm[el].to_numpy(dtype=np.float64), es.unit, es.canonical_unit)
+            El(
+                el,
+                bm[el].to_numpy(dtype=np.float64),
+                es.unit,
+                es.canonical_unit,
+                measure_units(cfg).tonnes_per_tonnage_unit,
+            )
             for el, es in ctx.schema.elements.items()
         ]
         result["units"] = {
-            el: {"grade": es.unit, "metal": metal_unit(es.canonical_unit)}
-            for el, es in ctx.schema.elements.items()
+            el: {"grade": es.unit, "metal": es.metal_unit} for el, es in ctx.schema.elements.items()
         }
 
         # --- 2. inventory --------------------------------------------------------------------
@@ -272,7 +292,7 @@ def run(ctx: AuditContext) -> None:
         agg = aggregate(key, n_d * n_r, vol, tonnes, w, elements, has_tonnes)
         basis_sum = (agg["tonnes"] if has_tonnes else agg["volume"]).reshape(n_d, n_r).sum(axis=1)
         inventory = []
-        for i in np.flatnonzero(agg["blocks"]):
+        for i in _class_ordered(np.flatnonzero(agg["blocks"]), n_r):
             di, r = divmod(int(i), n_r)
             grades, metal = _grades_and_metal(agg, i, elements)
             part = (agg["tonnes"][i] if has_tonnes else agg["volume"][i]) / basis_sum[di]
@@ -283,7 +303,7 @@ def run(ctx: AuditContext) -> None:
                     "rank": r,
                     "class": labels.get(r, str(r)),
                     "blocks": int(agg["blocks"][i]),
-                    "volume_m3": float(agg["volume"][i]),
+                    "volume": float(agg["volume"][i]),
                     "tonnes": _tonnes_or_none(agg, i, has_tonnes),
                     "pct_of_domain": float(part * 100.0) if basis_sum[di] > 0 else None,
                     "grade": grades,
@@ -301,17 +321,17 @@ def run(ctx: AuditContext) -> None:
                 has_tonnes,
                 {"rank": r, "class": labels.get(r, str(r))},
             )
-            for r in range(n_r)
+            for r in CLASS_ORDER
             if (rows & (ranks == r)).any()
         ]
         result["total_tonnes"] = float(np.nansum(tonnes[rows])) if has_tonnes else None
-        result["total_volume_m3"] = float(np.nansum(vol[rows]))
+        result["total_volume"] = float(np.nansum(vol[rows]))
 
         # --- 3. unclassified mineralized -----------------------------------------------------
         above = np.zeros(len(bm), dtype=bool)
         cutoffs, skipped = {}, []
         for el, grade, *_ in elements:
-            th = element_threshold(cfg, ctx.schema.elements[el], "diagnostic_cutoff")
+            th = element_threshold(cfg, ctx.schema.elements[el], "cutoff")
             if th is None:
                 skipped.append(el)
                 continue
@@ -331,7 +351,7 @@ def run(ctx: AuditContext) -> None:
                 {
                     "check": "FLAG_UNCLASS_MINERALIZED",
                     "element": el,
-                    "reason": "no diagnostic cutoff",
+                    "reason": "no cutoff",
                 }
                 for el in skipped
             ]
@@ -339,7 +359,7 @@ def run(ctx: AuditContext) -> None:
             ctx.warn(
                 "warning",
                 MODULE,
-                "No element has a diagnostic cutoff; unclassified check is empty.",
+                "No element has a cutoff; unclassified check is empty.",
             )
 
         # --- 4. resource statement -----------------------------------------------------------
